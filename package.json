@@ -10,7 +10,8 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "npm run build:electron && tsc && vite build",
     "preview": "vite preview",
-    "electron:dev": "npm run build:electron && concurrently \"vite --force\" \"wait-on http://localhost:5173 && electron .\""
+    "electron:dev": "npm run build:electron && concurrently \"vite --force\" \"wait-on http://localhost:5173 && electron .\"",
+    "dist": "npm run build && electron-builder"
   },
   "dependencies": {
     "lucide-react": "^1.38.0",
