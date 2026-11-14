@@ -6,7 +6,6 @@ export interface ModbusServiceConfig {
   port: number;
   slaveId: number;
   pollingIntervalMs: number;
-  useSimulator: boolean;
 }
 
 export interface PhaseValues {
@@ -27,16 +26,17 @@ export interface ModbusAlarms {
 
 export interface ModbusDataPayload {
   connected: boolean;
-  simulatorMode: boolean;
   timestamp: string;
-  temperatures: Record<number, number>; // Point 1..48 in °C
+  temperatures: Record<number, number>; // Point 1..48 in °C (from Holding Registers 1..48)
+  rawTemperatures?: Record<number, number>;
   voltages: PhaseValues;
-  currents: PhaseValues;
+  currents: PhaseValues; // R, Y, B (from Holding Registers 49, 51, 53)
   outputCurrents: PhaseValues;
   setpointCurrent: number;
   hysteresis: number;
   ctRange: number;
   alarms: ModbusAlarms;
+  rawRegisters?: Record<number, number>;
 }
 
 export class ModbusTcpService extends EventEmitter {
@@ -46,39 +46,18 @@ export class ModbusTcpService extends EventEmitter {
     port: 502,
     slaveId: 1,
     pollingIntervalMs: 500,
-    useSimulator: true, // Default to simulator if offline
   };
 
   private connected: boolean = false;
   private transactionId: number = 1;
   private pollTimer: NodeJS.Timeout | null = null;
   private isPolling: boolean = false;
+  private detectedPduOffset: number | null = null;
   private pendingRequests = new Map<number, { resolve: (data: Buffer | null) => void; reject: (err: Error) => void }>();
   private receiveBuffer: Buffer = Buffer.alloc(0);
 
-  // Simulated base values for 48 channels & phase power metrics
-  private simTemperatures: Record<number, number> = {};
-  private simTick: number = 0;
-  private simCoils: Record<number, boolean> = {
-    1: false, // Coil 1 (00001): Phase Fail
-    2: false, // Coil 2 (00002): Thermal Overload
-    3: false, // Coil 3 (00003): Dim Min R
-    4: false, // Coil 4 (00004): Dim Min Y
-    5: false, // Coil 5 (00005): Dim Min B
-    6: false, // Coil 6 (00006): Alarm Bit
-    7: true,  // Coil 7 (00007): Test On
-  };
-
   constructor() {
     super();
-    this.initSimData();
-  }
-
-  private initSimData() {
-    for (let i = 1; i <= 48; i++) {
-      // Baseline ambient temps around 28.0 °C
-      this.simTemperatures[i] = 28.0 + (i % 7) * 0.4 + (Math.sin(i) * 0.5);
-    }
   }
 
   public getConfig(): ModbusServiceConfig {
@@ -94,20 +73,6 @@ export class ModbusTcpService extends EventEmitter {
   }
 
   public async connect(): Promise<boolean> {
-    if (this.config.useSimulator) {
-      this.disconnect();
-      this.connected = false;
-      this.startPolling();
-      this.emit('status', {
-        connected: false,
-        useSimulator: true,
-        ip: this.config.ip,
-        port: this.config.port,
-        slaveId: this.config.slaveId,
-      });
-      return true;
-    }
-
     if (this.socket) {
       this.socket.destroy();
       this.socket = null;
@@ -120,11 +85,12 @@ export class ModbusTcpService extends EventEmitter {
       this.socket.setTimeout(3000);
 
       this.socket.connect(this.config.port, this.config.ip, () => {
-        console.log(`[Modbus TCP] Connected to HMI / ModSim32 at ${this.config.ip}:${this.config.port}`);
+        console.log(`[Modbus TCP] Connected to HMI hardware at ${this.config.ip}:${this.config.port}`);
         this.connected = true;
+        this.detectedPduOffset = null;
+        this.socket?.setTimeout(0); // Disable connection idle timeout once established
         this.emit('status', {
           connected: true,
-          useSimulator: false,
           ip: this.config.ip,
           port: this.config.port,
           slaveId: this.config.slaveId,
@@ -144,7 +110,7 @@ export class ModbusTcpService extends EventEmitter {
       this.socket.on('error', (err) => {
         console.warn(`[Modbus TCP] Socket error (${this.config.ip}:${this.config.port}):`, err.message);
         this.connected = false;
-        this.emit('status', { connected: false, useSimulator: false, error: err.message });
+        this.emit('status', { connected: false, error: err.message });
         if (!isResolved) {
           isResolved = true;
           resolve(false);
@@ -154,7 +120,7 @@ export class ModbusTcpService extends EventEmitter {
       this.socket.on('close', () => {
         console.log('[Modbus TCP] Socket connection closed');
         this.connected = false;
-        this.emit('status', { connected: false, useSimulator: false });
+        this.emit('status', { connected: false });
         if (!isResolved) {
           isResolved = true;
           resolve(false);
@@ -165,7 +131,7 @@ export class ModbusTcpService extends EventEmitter {
         console.warn('[Modbus TCP] Socket connection timeout');
         if (this.socket) this.socket.destroy();
         this.connected = false;
-        this.emit('status', { connected: false, useSimulator: false, error: `Connection timeout: No server responding at ${this.config.ip}:${this.config.port}` });
+        this.emit('status', { connected: false, error: `Connection timeout: No server responding at ${this.config.ip}:${this.config.port}` });
         if (!isResolved) {
           isResolved = true;
           resolve(false);
@@ -184,7 +150,8 @@ export class ModbusTcpService extends EventEmitter {
       this.socket = null;
     }
     this.connected = false;
-    this.emit('status', { connected: false, useSimulator: false });
+    this.detectedPduOffset = null;
+    this.emit('status', { connected: false });
   }
 
   private startPolling() {
@@ -205,94 +172,134 @@ export class ModbusTcpService extends EventEmitter {
   }
 
   private async pollData() {
-    const timestamp = new Date().toISOString();
-
-    if (this.config.useSimulator || !this.connected) {
-      this.simTick++;
-      const payload = this.generateSimulatedPayload(timestamp);
-      this.emit('data', payload);
+    if (!this.socket || !this.connected) {
       return;
     }
 
+    const timestamp = new Date().toISOString();
+
     try {
-      // 1. Read RTD Temperature Registers (Try PDU address 9/10 to support ModSim32 40010 & 40011)
-      let tempBuffer = await this.readHoldingRegisters(9, 49);
-      if (!tempBuffer) {
-        tempBuffer = await this.readHoldingRegisters(10, 48);
-      }
-      if (!tempBuffer) {
-        tempBuffer = await this.readHoldingRegisters(9, 10);
-      }
-      if (!tempBuffer) {
-        tempBuffer = await this.readHoldingRegisters(10, 10);
-      }
-      if (!tempBuffer) {
-        tempBuffer = await this.readHoldingRegisters(0, 10);
-      }
+      // Hardware Register Mapping from CSV:
+      // TEMP_1 .. TEMP_48: Holding Registers 4X 1..48 (1 word each)
+      // Current R Phase_OP_MTR: Holding Register 4X 49 (2 words, 32-bit Float)
+      // Current Y Phase_OP_MTR: Holding Register 4X 51 (2 words, 32-bit Float)
+      // Current B Phase_OP_MTR: Holding Register 4X 53 (2 words, 32-bit Float)
+      // Total contiguous span: 54 holding registers (108 bytes)
 
-      const temps: Record<number, number> = { ...this.simTemperatures };
+      let bulkBuffer: Buffer | null = null;
+      let startPdu = this.detectedPduOffset ?? 0;
 
-      if (tempBuffer && tempBuffer.length >= 2) {
-        const wordsAvailable = Math.min(48, Math.floor(tempBuffer.length / 2));
-        for (let i = 0; i < wordsAvailable; i++) {
-          const rawInt = tempBuffer.readInt16BE(i * 2);
-          if (rawInt > 0) {
-            temps[i + 1] = Math.round((rawInt / 10.0) * 10) / 10;
+      if (this.detectedPduOffset !== null) {
+        // Use cached PDU offset
+        bulkBuffer = await this.readHoldingRegisters(this.detectedPduOffset, 54);
+      } else {
+        // Auto-detect: Try 1-based PDU address 0 (4X 1 = PDU 0) for 54 registers
+        bulkBuffer = await this.readHoldingRegisters(0, 54);
+        if (bulkBuffer && bulkBuffer.length >= 108) {
+          startPdu = 0;
+          this.detectedPduOffset = 0;
+        } else {
+          // Try 0-based PDU address 1 (4X 1 = PDU 1) for 54 registers
+          bulkBuffer = await this.readHoldingRegisters(1, 54);
+          if (bulkBuffer && bulkBuffer.length >= 108) {
+            startPdu = 1;
+            this.detectedPduOffset = 1;
           }
         }
       }
 
-      // 2. Read Voltages (D30, D32, D34 -> Address 30, 6 registers Float32)
-      const voltBuffer = await this.readHoldingRegisters(30, 6);
-      const voltages: PhaseValues = {
-        r: voltBuffer && voltBuffer.length >= 4 ? this.parseFloat32(voltBuffer, 0) : 415.2,
-        y: voltBuffer && voltBuffer.length >= 8 ? this.parseFloat32(voltBuffer, 2) : 414.8,
-        b: voltBuffer && voltBuffer.length >= 12 ? this.parseFloat32(voltBuffer, 4) : 415.5,
-      };
+      // If bulk 54-register read failed (e.g. PLC max packet limitation), split into chunks
+      let tempBuffer: Buffer | null = null;
+      let currentBuffer: Buffer | null = null;
 
-      // 3. Read Currents (D46, D48, D50 -> Address 46, 6 registers Float32)
-      const currBuffer = await this.readHoldingRegisters(46, 6);
+      if (!bulkBuffer) {
+        const offset = this.detectedPduOffset ?? 0;
+        // Read 48 temperature registers
+        tempBuffer = await this.readHoldingRegisters(offset, 48);
+        if (!tempBuffer && this.detectedPduOffset === null) {
+          tempBuffer = await this.readHoldingRegisters(1, 48);
+          if (tempBuffer && tempBuffer.length >= 96) {
+            startPdu = 1;
+            this.detectedPduOffset = 1;
+          }
+        }
+        // Read 6 current registers (Starting at Address 49)
+        const currentPdu = (this.detectedPduOffset ?? startPdu) === 0 ? 48 : 49;
+        currentBuffer = await this.readHoldingRegisters(currentPdu, 6);
+      }
+
+      const temps: Record<number, number> = {};
+      const rawTemps: Record<number, number> = {};
+      const rawRegs: Record<number, number> = {};
+
+      // Parse 48 RTD Temperature Channels
+      const tBuf = bulkBuffer || tempBuffer;
+      if (tBuf && tBuf.length >= 2) {
+        const wordsAvailable = Math.min(48, Math.floor(tBuf.length / 2));
+        for (let i = 0; i < wordsAvailable; i++) {
+          const rawInt = tBuf.readInt16BE(i * 2);
+          const channelId = i + 1;
+          rawTemps[channelId] = rawInt;
+          rawRegs[channelId] = rawInt;
+
+          // Convert raw integer to temperature in °C
+          // User specification: "temperature will come like 254 so we have to consider 25.4 degree celcius"
+          // Condition: "if current at any point comes above 30000 show fail in ui for that sensor(point)"
+          let calculatedTemp = 0;
+          if (rawInt >= 30000) {
+            calculatedTemp = 30000; // Flagged as fail for UI
+          } else {
+            calculatedTemp = Math.round((rawInt / 10.0) * 10) / 10;
+          }
+          temps[channelId] = calculatedTemp;
+        }
+      }
+
+      // Parse 3-Phase Currents (Registers 49, 51, 53 — 2 words each Word-Swapped Float32 CD AB)
+      const cBuf = bulkBuffer ? bulkBuffer.subarray(96, 108) : currentBuffer;
+      let currR = 0;
+      let currY = 0;
+      let currB = 0;
+
+      if (cBuf && cBuf.length >= 12) {
+        rawRegs[49] = cBuf.readUInt16BE(0);
+        rawRegs[50] = cBuf.readUInt16BE(2);
+        rawRegs[51] = cBuf.readUInt16BE(4);
+        rawRegs[52] = cBuf.readUInt16BE(6);
+        rawRegs[53] = cBuf.readUInt16BE(8);
+        rawRegs[54] = cBuf.readUInt16BE(10);
+
+        currR = this.parse32BitValue(cBuf, 0);
+        currY = this.parse32BitValue(cBuf, 4);
+        currB = this.parse32BitValue(cBuf, 8);
+      }
+
       const currents: PhaseValues = {
-        r: currBuffer && currBuffer.length >= 4 ? this.parseFloat32(currBuffer, 0) : 2000.0,
-        y: currBuffer && currBuffer.length >= 8 ? this.parseFloat32(currBuffer, 2) : 1998.5,
-        b: currBuffer && currBuffer.length >= 12 ? this.parseFloat32(currBuffer, 4) : 2001.2,
+        r: currR,
+        y: currY,
+        b: currB,
       };
-
-      // 4. Read Output Currents (D102, D104, D106 -> Address 102, 6 registers Float32)
-      const opCurrBuffer = await this.readHoldingRegisters(102, 6);
-      const outputCurrents: PhaseValues = {
-        r: opCurrBuffer && opCurrBuffer.length >= 4 ? this.parseFloat32(opCurrBuffer, 0) : 2000.0,
-        y: opCurrBuffer && opCurrBuffer.length >= 8 ? this.parseFloat32(opCurrBuffer, 2) : 1999.0,
-        b: opCurrBuffer && opCurrBuffer.length >= 12 ? this.parseFloat32(opCurrBuffer, 4) : 2002.0,
-      };
-
-      // 5. Read Setpoint (D200, D202 -> Address 200, 2 words)
-      const setpointBuffer = await this.readHoldingRegisters(200, 2);
-      const setpointCurrent = setpointBuffer && setpointBuffer.length >= 2 ? setpointBuffer.readUInt16BE(0) : 2000;
-      const hysteresis = setpointBuffer && setpointBuffer.length >= 4 ? setpointBuffer.readUInt16BE(2) : 5;
-
-      // 6. Read Coil Status (Address 0, 8 coils -> ModSim32 00001..00008)
-      const coilBuffer = await this.readCoils(0, 8);
 
       const payload: ModbusDataPayload = {
         connected: true,
-        simulatorMode: false,
         timestamp,
         temperatures: temps,
-        voltages,
+        rawTemperatures: rawTemps,
+        voltages: { r: 0, y: 0, b: 0 },
         currents,
-        outputCurrents,
-        setpointCurrent,
-        hysteresis,
+        outputCurrents: currents,
+        setpointCurrent: 0,
+        hysteresis: 0,
         ctRange: 2000,
+        rawRegisters: rawRegs,
         alarms: {
-          phaseFail: coilBuffer && coilBuffer.length >= 1 ? Boolean(coilBuffer.readUInt8(0) & (1 << 0)) : (this.simCoils[1] ?? false),
-          thermalOverload: coilBuffer && coilBuffer.length >= 1 ? Boolean(coilBuffer.readUInt8(0) & (1 << 1)) : (this.simCoils[2] ?? false),
-          dimMinR: coilBuffer && coilBuffer.length >= 1 ? Boolean(coilBuffer.readUInt8(0) & (1 << 2)) : (this.simCoils[3] ?? false),
-          dimMinY: coilBuffer && coilBuffer.length >= 1 ? Boolean(coilBuffer.readUInt8(0) & (1 << 3)) : (this.simCoils[4] ?? false),
-          dimMinB: coilBuffer && coilBuffer.length >= 1 ? Boolean(coilBuffer.readUInt8(0) & (1 << 4)) : (this.simCoils[5] ?? false),
-          alarmBit: coilBuffer && coilBuffer.length >= 1 ? Boolean(coilBuffer.readUInt8(0) & (1 << 5)) : (this.simCoils[6] ?? false),
-          testOn: coilBuffer && coilBuffer.length >= 1 ? Boolean(coilBuffer.readUInt8(0) & (1 << 6)) : (this.simCoils[7] ?? true),
+          phaseFail: false,
+          thermalOverload: false,
+          dimMinR: false,
+          dimMinY: false,
+          dimMinB: false,
+          alarmBit: false,
+          testOn: true,
         },
       };
 
@@ -302,64 +309,40 @@ export class ModbusTcpService extends EventEmitter {
     }
   }
 
-  private parseFloat32(buf: Buffer, offsetWordIndex: number): number {
+  private parse32BitValue(buf: Buffer, offsetByte: number): number {
     try {
-      const offsetByte = offsetWordIndex * 2;
-      const highWord = buf.readUInt16BE(offsetByte);
-      const lowWord = buf.readUInt16BE(offsetByte + 2);
+      if (offsetByte + 4 > buf.length) return 0.0;
 
-      const floatBuf = Buffer.alloc(4);
-      floatBuf.writeUInt16BE(highWord, 0);
-      floatBuf.writeUInt16BE(lowWord, 2);
-      const floatVal = floatBuf.readFloatBE(0);
-      return isNaN(floatVal) ? 0 : Math.round(floatVal * 10) / 10;
+      const w0 = buf.readUInt16BE(offsetByte);     // Word 0 (CD)
+      const w1 = buf.readUInt16BE(offsetByte + 2); // Word 1 (AB)
+
+      // User specification: "current format is Word-Swapped Float32 (CD AB)"
+      // Put AB (Word 1) in high order and CD (Word 0) in low order to decode IEEE 754 Float32
+      const swapBuf = Buffer.alloc(4);
+      swapBuf.writeUInt16BE(w1, 0);
+      swapBuf.writeUInt16BE(w0, 2);
+      const floatVal = swapBuf.readFloatBE(0);
+
+      if (!isNaN(floatVal) && isFinite(floatVal) && Math.abs(floatVal) <= 1000000) {
+        return Math.round(floatVal * 10) / 10;
+      }
+
+      // Secondary check: Standard Big-Endian Float32 (AB CD) fallback
+      const floatBE = buf.readFloatBE(offsetByte);
+      if (!isNaN(floatBE) && isFinite(floatBE) && Math.abs(floatBE) <= 1000000) {
+        return Math.round(floatBE * 10) / 10;
+      }
+
+      // Integer fallback (if words contain raw integer current)
+      const uintVal = (w1 << 16) | w0;
+      if (uintVal > 0 && uintVal <= 1000000) {
+        return Math.round(uintVal * 10) / 10;
+      }
+
+      return 0.0;
     } catch {
-      return 0;
+      return 0.0;
     }
-  }
-
-  private generateSimulatedPayload(timestamp: string): ModbusDataPayload {
-    const noise = () => (Math.random() - 0.5) * 0.15;
-    const rise = Math.min(25.0, this.simTick * 0.02);
-
-    for (let i = 1; i <= 48; i++) {
-      const base = 28.0 + (i % 6) * 0.5;
-      this.simTemperatures[i] = Math.round((base + rise + noise()) * 10) / 10;
-    }
-
-    return {
-      connected: this.connected,
-      simulatorMode: true,
-      timestamp,
-      temperatures: { ...this.simTemperatures },
-      voltages: {
-        r: Math.round((415.0 + noise() * 3) * 10) / 10,
-        y: Math.round((414.8 + noise() * 3) * 10) / 10,
-        b: Math.round((415.3 + noise() * 3) * 10) / 10,
-      },
-      currents: {
-        r: Math.round((2000.0 + noise() * 10) * 10) / 10,
-        y: Math.round((1998.5 + noise() * 10) * 10) / 10,
-        b: Math.round((2001.2 + noise() * 10) * 10) / 10,
-      },
-      outputCurrents: {
-        r: Math.round((2000.0 + noise() * 10) * 10) / 10,
-        y: Math.round((1999.0 + noise() * 10) * 10) / 10,
-        b: Math.round((2002.0 + noise() * 10) * 10) / 10,
-      },
-      setpointCurrent: 2000,
-      hysteresis: 5,
-      ctRange: 2000,
-      alarms: {
-        phaseFail: this.simCoils[1] ?? false,
-        thermalOverload: this.simCoils[2] ?? false,
-        dimMinR: this.simCoils[3] ?? false,
-        dimMinY: this.simCoils[4] ?? false,
-        dimMinB: this.simCoils[5] ?? false,
-        alarmBit: this.simCoils[6] ?? false,
-        testOn: this.simCoils[7] ?? true,
-      },
-    };
   }
 
   // --- Native Modbus TCP MBAP Low-Level Framing ---
@@ -408,13 +391,13 @@ export class ModbusTcpService extends EventEmitter {
         }
       });
 
-      // Quick 400ms timeout per request
+      // 1200ms timeout per request to allow thorough PLC scan cycle
       timer = setTimeout(() => {
         if (this.pendingRequests.has(tId)) {
           this.pendingRequests.delete(tId);
           resolve(null);
         }
-      }, 400);
+      }, 1200);
     });
   }
 
@@ -472,8 +455,7 @@ export class ModbusTcpService extends EventEmitter {
 
   public async writeCoil(address: number, state: boolean): Promise<boolean> {
     if (!this.socket || !this.connected) {
-      console.log(`[Modbus TCP Sim] Written Coil ${address} = ${state}`);
-      return true;
+      return false;
     }
 
     const tId = this.getNextTransactionId();
@@ -512,18 +494,12 @@ export class ModbusTcpService extends EventEmitter {
     address: number,
     state: boolean
   ): Promise<{ success: boolean; message: string; writtenCoils: { address: number; state: boolean }[] }> {
-    // Translate 1-based ModSim32 display address (e.g. 1 -> ModSim32 00001) to 0-based Modbus PDU address (e.g. 0)
     const pduAddress = address >= 1 ? address - 1 : address;
-
-    // Cache simulated coil state
-    this.simCoils[address] = state;
-    this.simCoils[pduAddress + 1] = state;
-
     const success = await this.writeCoil(pduAddress, state);
 
     const msg = success
-      ? `✅ Written Coil status to ModSim32 Address ${address} (Modbus PDU ${pduAddress}, FC 05) = ${state ? 'ON (1 / 0xFF00)' : 'OFF (0 / 0x0000)'}`
-      : `❌ Failed to write Coil status to Modbus address ${address}`;
+      ? `✅ Written Coil status to Address ${address} (Modbus PDU ${pduAddress}, FC 05) = ${state ? 'ON (1 / 0xFF00)' : 'OFF (0 / 0x0000)'}`
+      : `❌ Failed to write Coil status to Modbus address ${address} (Hardware offline or not responding)`;
 
     return {
       success,
@@ -534,8 +510,7 @@ export class ModbusTcpService extends EventEmitter {
 
   public async writeRegister(address: number, value: number): Promise<boolean> {
     if (!this.socket || !this.connected) {
-      console.log(`[Modbus TCP Sim] Written Register ${address} = ${value}`);
-      return true;
+      return false;
     }
 
     const tId = this.getNextTransactionId();
@@ -558,8 +533,7 @@ export class ModbusTcpService extends EventEmitter {
     if (registers.length === 0) return true;
 
     if (!this.socket || !this.connected) {
-      console.log(`[Modbus TCP Sim] Written Multiple Registers starting at ${startAddress} (${registers.length} words):`, registers);
-      return true;
+      return false;
     }
 
     const quantity = registers.length;

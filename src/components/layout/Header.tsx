@@ -16,24 +16,15 @@ export const Header: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const handleQuickConnectSim = async () => {
+  const handleConnectHardware = async () => {
     setConnecting(true);
-    setMsg('Activating Modbus Simulator Mode...');
+    setMsg(`Connecting to Modbus TCP Hardware at ${modbusStatus.ip || '192.168.0.200'}:${modbusStatus.port || 502}...`);
     try {
-      await connectModbus({ useSimulator: true });
-      setMsg('✓ Modbus Simulator Active');
-    } catch (err: any) {
-      setMsg(`❌ Error: ${err.message}`);
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const handleQuickConnectHardware = async () => {
-    setConnecting(true);
-    setMsg(`Connecting to Flexem HMI at ${modbusStatus.ip || '192.168.0.200'}:${modbusStatus.port || 502}...`);
-    try {
-      const success = await connectModbus({ useSimulator: false });
+      const success = await connectModbus({
+        ip: modbusStatus.ip || '192.168.0.200',
+        port: modbusStatus.port || 502,
+        slaveId: modbusStatus.slaveId || 1,
+      });
       if (success) {
         setMsg(`✓ Connected to ${modbusStatus.ip}:${modbusStatus.port}`);
       } else {
@@ -46,9 +37,9 @@ export const Header: React.FC = () => {
     }
   };
 
-  const handleQuickDisconnect = async () => {
+  const handleDisconnectHardware = async () => {
     await disconnectModbus();
-    setMsg('Disconnected from Modbus TCP server');
+    setMsg('Disconnected from Modbus TCP hardware');
   };
 
   return (
@@ -109,30 +100,16 @@ export const Header: React.FC = () => {
             fontWeight: 600,
             backgroundColor: modbusStatus.connected
               ? 'rgba(16, 185, 129, 0.15)'
-              : modbusStatus.useSimulator
-              ? 'rgba(245, 158, 11, 0.15)'
               : 'rgba(239, 68, 68, 0.15)',
-            border: `1px solid ${
-              modbusStatus.connected
-                ? '#10b981'
-                : modbusStatus.useSimulator
-                ? '#f59e0b'
-                : '#ef4444'
-            }`,
-            color: modbusStatus.connected
-              ? '#34d399'
-              : modbusStatus.useSimulator
-              ? '#fbbf24'
-              : '#f87171',
+            border: `1px solid ${modbusStatus.connected ? '#10b981' : '#ef4444'}`,
+            color: modbusStatus.connected ? '#34d399' : '#f87171',
             transition: 'all 0.2s ease',
           }}
-          title="Click to manage Modbus TCP connection & simulator"
+          title="Click to manage Modbus TCP hardware connection"
         >
           <Network size={15} />
           {modbusStatus.connected
             ? `TCP CONNECTED (${modbusStatus.ip})`
-            : modbusStatus.useSimulator
-            ? 'MODBUS SIMULATOR ACTIVE'
             : 'MODBUS OFFLINE'}
         </div>
 
@@ -215,23 +192,19 @@ export const Header: React.FC = () => {
                     borderRadius: '4px',
                     backgroundColor: modbusStatus.connected
                       ? 'rgba(16, 185, 129, 0.2)'
-                      : modbusStatus.useSimulator
-                      ? 'rgba(245, 158, 11, 0.2)'
                       : 'rgba(239, 68, 68, 0.2)',
-                    color: modbusStatus.connected ? '#34d399' : modbusStatus.useSimulator ? '#fbbf24' : '#f87171',
-                    border: `1px solid ${modbusStatus.connected ? '#10b981' : modbusStatus.useSimulator ? '#f59e0b' : '#ef4444'}`,
+                    color: modbusStatus.connected ? '#34d399' : '#f87171',
+                    border: `1px solid ${modbusStatus.connected ? '#10b981' : '#ef4444'}`,
                   }}
                 >
                   {modbusStatus.connected
                     ? '🟢 CONNECTED (REAL HMI)'
-                    : modbusStatus.useSimulator
-                    ? '🟡 SIMULATOR MODE ACTIVE'
                     : '🔴 MODBUS OFFLINE'}
                 </span>
               </div>
 
               <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '12px' }}>
-                Target Target IP: <strong>{modbusStatus.ip || '192.168.0.200'}</strong> | Port: <strong>{modbusStatus.port || 502}</strong> | Unit ID: <strong>{modbusStatus.slaveId || 1}</strong>
+                Target IP: <strong>{modbusStatus.ip || '192.168.0.200'}</strong> | Port: <strong>{modbusStatus.port || 502}</strong> | Unit ID: <strong>{modbusStatus.slaveId || 1}</strong>
               </div>
 
               {msg && (
@@ -243,31 +216,21 @@ export const Header: React.FC = () => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <button
                   className="btn btn-primary"
-                  onClick={handleQuickConnectSim}
-                  disabled={connecting}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px' }}
-                >
-                  <Sliders size={16} />
-                  Enable Modbus Simulator Mode
-                </button>
-
-                <button
-                  className="btn btn-secondary"
-                  onClick={handleQuickConnectHardware}
+                  onClick={handleConnectHardware}
                   disabled={connecting}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px' }}
                 >
                   <RefreshCw size={16} className={connecting ? 'spin' : ''} />
-                  Connect Real Ethernet HMI Hardware
+                  Connect Modbus TCP Hardware
                 </button>
 
                 <button
                   className="btn btn-secondary"
-                  onClick={handleQuickDisconnect}
+                  onClick={handleDisconnectHardware}
                   disabled={connecting}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', color: '#f87171', borderColor: '#ef4444' }}
                 >
-                  Disconnect Modbus Service
+                  Disconnect Modbus Hardware
                 </button>
               </div>
             </div>

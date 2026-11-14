@@ -124,13 +124,12 @@ function createWindow() {
     }
   });
 
-  // Start polling default or simulator data on app start
+  // Set default Modbus TCP hardware parameters
   modbusTcpServiceSingleton.updateConfig({
     ip: '192.168.0.200',
     port: 502,
     slaveId: 1,
     pollingIntervalMs: 500,
-    useSimulator: true,
   });
 
   mainWindow.on('closed', () => {

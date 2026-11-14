@@ -32,7 +32,6 @@ export const LiveDashboard: React.FC = () => {
     activeAlarms,
     endTestSession,
     setActiveTab,
-    triggerMockAlarm,
     nextLogCountdown,
     modbusData,
     modbusStatus,
@@ -103,8 +102,7 @@ export const LiveDashboard: React.FC = () => {
   const ambient = Number(activeSession?.config.specification.ambientTemp) || 25;
   const limitRise = Number(activeSession?.config.specification.limitTempRise) || 65;
 
-  const voltages = modbusData?.voltages || { r: 415.2, y: 414.8, b: 415.5 };
-  const currents = modbusData?.currents || { r: 2000.0, y: 1998.5, b: 2001.2 };
+  const currents = modbusData?.currents || { r: 0.0, y: 0.0, b: 0.0 };
 
   return (
     <div style={{ padding: '20px', height: '100%', overflowY: 'auto' }}>
@@ -164,49 +162,61 @@ export const LiveDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* MODBUS TCP PHASE METRICS CARD (VOLTAGES & CURRENTS) */}
+      {/* MODBUS TCP PHASE CURRENTS CARD */}
       <div className="ind-card" style={{ marginBottom: '16px', padding: '14px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Zap size={18} color="#3b82f6" />
             <h3 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
-              Modbus TCP Phase Electrical Telemetry (Float32)
+              Modbus TCP Phase Electrical Currents (Float32 CD AB)
             </h3>
           </div>
-          <span style={{ fontSize: '11px', color: modbusStatus.connected ? '#34d399' : '#fbbf24' }}>
-            {modbusStatus.connected ? `Modbus IP: ${modbusStatus.ip}:${modbusStatus.port}` : 'Modbus TCP Simulator Active'}
+          <span style={{ fontSize: '11px', color: modbusStatus.connected ? '#34d399' : '#f87171' }}>
+            {modbusStatus.connected ? `Modbus IP: ${modbusStatus.ip}:${modbusStatus.port}` : 'Modbus TCP Disconnected'}
           </span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
-          <div style={{ backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '4px', border: '1px solid #ef4444' }}>
-            <div style={{ fontSize: '10px', color: '#ef4444', fontWeight: 700 }}>R-PHASE VOLTAGE</div>
-            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>{voltages.r.toFixed(1)} V</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+          <div style={{ backgroundColor: '#0f172a', padding: '10px 14px', borderRadius: '4px', border: `1px solid ${currents.r > 30000 ? '#ef4444' : '#ef4444'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '11px', color: '#ef4444', fontWeight: 700 }}>R-PHASE CURRENT (4X 49)</div>
+              {currents.r > 30000 && (
+                <span style={{ backgroundColor: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px' }}>
+                  FAIL
+                </span>
+              )}
+            </div>
+            <div className="font-mono" style={{ fontSize: '20px', fontWeight: 800, color: currents.r > 30000 ? '#ef4444' : '#34d399' }}>
+              {currents.r > 30000 ? `${currents.r.toFixed(1)} A [FAIL]` : `${currents.r.toFixed(1)} A`}
+            </div>
           </div>
 
-          <div style={{ backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '4px', border: '1px solid #f59e0b' }}>
-            <div style={{ fontSize: '10px', color: '#f59e0b', fontWeight: 700 }}>Y-PHASE VOLTAGE</div>
-            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>{voltages.y.toFixed(1)} V</div>
+          <div style={{ backgroundColor: '#0f172a', padding: '10px 14px', borderRadius: '4px', border: `1px solid ${currents.y > 30000 ? '#ef4444' : '#f59e0b'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 700 }}>Y-PHASE CURRENT (4X 51)</div>
+              {currents.y > 30000 && (
+                <span style={{ backgroundColor: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px' }}>
+                  FAIL
+                </span>
+              )}
+            </div>
+            <div className="font-mono" style={{ fontSize: '20px', fontWeight: 800, color: currents.y > 30000 ? '#ef4444' : '#34d399' }}>
+              {currents.y > 30000 ? `${currents.y.toFixed(1)} A [FAIL]` : `${currents.y.toFixed(1)} A`}
+            </div>
           </div>
 
-          <div style={{ backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '4px', border: '1px solid #3b82f6' }}>
-            <div style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 700 }}>B-PHASE VOLTAGE</div>
-            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>{voltages.b.toFixed(1)} V</div>
-          </div>
-
-          <div style={{ backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '4px', border: '1px solid #ef4444' }}>
-            <div style={{ fontSize: '10px', color: '#ef4444', fontWeight: 700 }}>R-PHASE CURRENT</div>
-            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#34d399' }}>{currents.r.toFixed(1)} A</div>
-          </div>
-
-          <div style={{ backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '4px', border: '1px solid #f59e0b' }}>
-            <div style={{ fontSize: '10px', color: '#f59e0b', fontWeight: 700 }}>Y-PHASE CURRENT</div>
-            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#34d399' }}>{currents.y.toFixed(1)} A</div>
-          </div>
-
-          <div style={{ backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '4px', border: '1px solid #3b82f6' }}>
-            <div style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 700 }}>B-PHASE CURRENT</div>
-            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#34d399' }}>{currents.b.toFixed(1)} A</div>
+          <div style={{ backgroundColor: '#0f172a', padding: '10px 14px', borderRadius: '4px', border: `1px solid ${currents.b > 30000 ? '#ef4444' : '#3b82f6'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '11px', color: '#3b82f6', fontWeight: 700 }}>B-PHASE CURRENT (4X 53)</div>
+              {currents.b > 30000 && (
+                <span style={{ backgroundColor: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px' }}>
+                  FAIL
+                </span>
+              )}
+            </div>
+            <div className="font-mono" style={{ fontSize: '20px', fontWeight: 800, color: currents.b > 30000 ? '#ef4444' : '#34d399' }}>
+              {currents.b > 30000 ? `${currents.b.toFixed(1)} A [FAIL]` : `${currents.b.toFixed(1)} A`}
+            </div>
           </div>
         </div>
       </div>
@@ -281,23 +291,6 @@ export const LiveDashboard: React.FC = () => {
                 {rng}
               </button>
             ))}
-
-            <button
-              onClick={() => triggerMockAlarm(1, 'Manual Over Temperature test alarm triggered by operator.')}
-              style={{
-                marginLeft: '12px',
-                padding: '4px 10px',
-                fontSize: '11px',
-                backgroundColor: '#7f1d1d',
-                color: '#fca5a5',
-                border: '1px solid #ef4444',
-                borderRadius: '3px',
-                cursor: 'pointer',
-                fontWeight: 600,
-              }}
-            >
-              <Zap size={12} style={{ display: 'inline', marginRight: '4px' }} /> Test Alarm
-            </button>
           </div>
         </div>
 
@@ -310,6 +303,7 @@ export const LiveDashboard: React.FC = () => {
           }}
         >
           {filteredSensors.map((sensor) => {
+            const isFail = sensor.status === 'fail' || sensor.isFailed || sensor.currentTemp >= 30000;
             const rise = Number((sensor.currentTemp - ambient).toFixed(1));
             const isWarning = sensor.status === 'warning';
             const isAlarm = sensor.status === 'alarm';
@@ -318,7 +312,11 @@ export const LiveDashboard: React.FC = () => {
             let cardBorder = '#334155';
             let statusColor = '#10b981';
 
-            if (isAlarm) {
+            if (isFail) {
+              cardBg = 'rgba(239, 68, 68, 0.22)';
+              cardBorder = '#ef4444';
+              statusColor = '#ef4444';
+            } else if (isAlarm) {
               cardBg = 'rgba(239, 68, 68, 0.15)';
               cardBorder = '#ef4444';
               statusColor = '#ef4444';
@@ -346,27 +344,50 @@ export const LiveDashboard: React.FC = () => {
                   <span style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8' }}>
                     {sensor.label}
                   </span>
-                  <span
-                    style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      backgroundColor: statusColor,
-                    }}
-                  />
+                  {isFail ? (
+                    <span style={{ backgroundColor: '#ef4444', color: '#ffffff', fontSize: '9px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px' }}>
+                      FAIL
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        backgroundColor: statusColor,
+                      }}
+                    />
+                  )}
                 </div>
 
                 <div style={{ margin: '6px 0' }}>
-                  <div className="font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>
-                    {sensor.currentTemp.toFixed(1)}°C
-                  </div>
-                  <div style={{ fontSize: '11px', color: rise > limitRise ? '#ef4444' : '#94a3b8' }}>
-                    ΔT: +{rise}°C
-                  </div>
+                  {isFail ? (
+                    <div>
+                      <div className="font-mono" style={{ fontSize: '20px', fontWeight: 800, color: '#ef4444' }}>
+                        FAIL
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#fca5a5', fontWeight: 600 }}>
+                        Value &gt; 30000
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>
+                        {sensor.currentTemp.toFixed(1)}°C
+                      </div>
+                      <div style={{ fontSize: '11px', color: rise > limitRise ? '#ef4444' : '#94a3b8' }}>
+                        ΔT: +{rise}°C
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div style={{ fontSize: '10px', color: '#64748b', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '4px' }}>
-                  Max: <strong className="font-mono" style={{ color: '#cbd5e1' }}>{sensor.maxTemp.toFixed(1)}°C</strong>
+                  {isFail ? (
+                    <span style={{ color: '#ef4444', fontWeight: 600 }}>SENSOR DISCONNECTED</span>
+                  ) : (
+                    <>Max: <strong className="font-mono" style={{ color: '#cbd5e1' }}>{sensor.maxTemp.toFixed(1)}°C</strong></>
+                  )}
                 </div>
               </div>
             );

@@ -6,7 +6,7 @@ import { generateAlarmCsv, downloadAlarmCsvFile } from '../../services/alarm/Ala
 import type { AlarmDefinition } from '../../types/test';
 
 export const AlarmCenterView: React.FC = () => {
-  const { activeAlarms, acknowledgeAlarm, triggerMockAlarm, activeSession } = useTestContext();
+  const { activeAlarms, acknowledgeAlarm, activeSession } = useTestContext();
   const [alarmDefs, setAlarmDefs] = useState<AlarmDefinition[]>(
     alarmManagerSingleton.getDefinitions()
   );
@@ -40,13 +40,6 @@ export const AlarmCenterView: React.FC = () => {
             }}
           >
             <FileSpreadsheet size={16} color="#10b981" /> Export Alarm Log (CSV)
-          </button>
-
-          <button
-            className="btn btn-warning"
-            onClick={() => triggerMockAlarm(1, 'Manual over-temperature safety simulation alarm.')}
-          >
-            <Bell size={16} /> Simulate Alarm Trigger
           </button>
         </div>
       </div>

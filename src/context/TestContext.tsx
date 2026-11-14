@@ -124,7 +124,6 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ip: '192.168.0.200',
     port: 502,
     slaveId: 1,
-    useSimulator: true,
   });
   const [modbusData, setModbusData] = useState<ModbusDataPayload | null>(null);
 
@@ -176,30 +175,27 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setModbusStatus((prev) => ({
           ...prev,
           connected: payload.connected,
-          useSimulator: payload.simulatorMode,
           lastPollTimestamp: payload.timestamp,
         }));
 
-        // Update sensor points live from Modbus temperature readings
+        // Update sensor points live from real Modbus hardware temperature readings
         if (payload.temperatures) {
-          setSensors((prevSensors) => {
-            if (prevSensors.length === 0) return prevSensors;
-            return prevSensors.map((sensor) => {
-              const newTemp = payload.temperatures[sensor.id] ?? sensor.currentTemp;
-              const maxTemp = Math.max(sensor.maxTemp, newTemp);
-              const tempRise = newTemp - ambient;
+          const ambient = Number(draftConfig.specification.ambientTemp) || 25;
+          const updated = sensorService.updateFromHardware(payload.temperatures, ambient);
+          setSensors(updated);
 
-              let status: 'normal' | 'warning' | 'alarm' = 'normal';
-              if (tempRise > 55 || newTemp > 85) status = 'alarm';
-              else if (tempRise > 45 || newTemp > 75) status = 'warning';
-
+          // If active test is running, sync sensors into activeSession and evaluate alarms
+          setActiveSession((currentSession) => {
+            if (currentSession && currentSession.status === 'running') {
+              const sessionAmbient = Number(currentSession.config.specification.ambientTemp) || ambient;
+              const limitRise = Number(currentSession.config.specification.limitTempRise) || 65;
+              alarmManagerSingleton.evaluateSensors(currentSession.testId, updated, sessionAmbient, limitRise);
               return {
-                ...sensor,
-                currentTemp: newTemp,
-                maxTemp,
-                status,
+                ...currentSession,
+                sensors: updated,
               };
-            });
+            }
+            return currentSession;
           });
         }
       });
@@ -223,7 +219,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const success = await window.electronAPI.modbus.connect(updatedStatus);
       return success;
     }
-    return true;
+    return false;
   };
 
   const disconnectModbus = async (): Promise<void> => {
@@ -237,7 +233,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (window.electronAPI?.modbus) {
       return window.electronAPI.modbus.writeCoil(address, state);
     }
-    return true;
+    return false;
   };
 
   const writeCoilStatusToModbus = async (address: number, state: boolean) => {
@@ -249,15 +245,15 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return {
         success: ok,
         message: ok
-          ? `✅ Written Coil status to ModSim32 Address ${address} (Modbus PDU ${pduAddress}, FC 05) = ${state ? 'ON (1 / 0xFF00)' : 'OFF (0 / 0x0000)'}`
+          ? `✅ Written Coil status to Address ${address} (Modbus PDU ${pduAddress}, FC 05) = ${state ? 'ON (1 / 0xFF00)' : 'OFF (0 / 0x0000)'}`
           : `❌ Failed to write Coil status to Modbus address ${address}`,
         writtenCoils: [{ address, state }],
       };
     }
     return {
-      success: true,
-      message: `[Simulated] Written Coil status to ModSim32 Address ${address} (Modbus PDU ${pduAddress}, FC 05) = ${state ? 'ON (1 / 0xFF00)' : 'OFF (0 / 0x0000)'}`,
-      writtenCoils: [{ address, state }],
+      success: false,
+      message: `❌ Modbus TCP hardware unavailable. Run in Desktop Electron application.`,
+      writtenCoils: [],
     };
   };
 
@@ -277,16 +273,10 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return await window.electronAPI.modbus.writeTestSpecification(targetSpec, startAddress, format, wordSwap);
     }
 
-    // Web fallback mode simulation message
-    const modeText = format === 'int' ? '16-bit Integer' : '32-bit Float';
     return {
-      success: true,
-      message: `[Simulated] Written ${modeText} specs to address ${startAddress}: Voltage=${targetSpec.ratedVoltage}, Current=${targetSpec.ratedCurrent}, TestCurrent=${targetSpec.testCurrent}`,
-      writtenRegisters: [
-        { address: startAddress, val: targetSpec.ratedVoltage },
-        { address: startAddress + 1, val: targetSpec.ratedCurrent },
-        { address: startAddress + 2, val: targetSpec.testCurrent },
-      ],
+      success: false,
+      message: `❌ Modbus TCP hardware unavailable. Run in Desktop Electron application.`,
+      writtenRegisters: [],
     };
   };
 
@@ -395,7 +385,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveTab('dashboard');
   };
 
-  // Live Timer & Sensor Tick loop
+  // Live Timer loop (1 second elapsed countdown)
   useEffect(() => {
     if (activeSession?.status === 'running') {
       timerRef.current = setInterval(() => {
@@ -404,21 +394,6 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const newElapsed = prev.elapsedSeconds + 1;
           const newRemaining = Math.max(0, prev.durationSeconds - newElapsed);
-
-          const ambient = Number(prev.config.specification.ambientTemp) || 25;
-          const limitRise = Number(prev.config.specification.limitTempRise) || 65;
-
-          if (modbusStatus.useSimulator) {
-            const updatedSensors = sensorService.tick(newElapsed, ambient);
-            setSensors(updatedSensors);
-            alarmManagerSingleton.evaluateSensors(prev.testId, updatedSensors, ambient, limitRise);
-            return {
-              ...prev,
-              elapsedSeconds: newElapsed,
-              remainingSeconds: newRemaining,
-              sensors: updatedSensors,
-            };
-          }
 
           return {
             ...prev,
@@ -434,7 +409,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [activeSession?.status, modbusStatus.useSimulator]);
+  }, [activeSession?.status]);
 
   const calculateFinalResults = (session: TestSession): FinalTestResults => {
     const ambientTemp = Number(session.config.specification.ambientTemp) || 25;
@@ -447,17 +422,20 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let failCount = 0;
 
     const pointResults: PointTestResult[] = session.sensors.map((sensor) => {
+      const isSensorFail = sensor.status === 'fail' || sensor.isFailed || sensor.currentTemp >= 30000;
       const initialTemp = sensor.initialTemp;
-      const maxTemp = sensor.maxTemp;
-      const tempRise = Number((maxTemp - ambientTemp).toFixed(1));
-      const pass = tempRise <= limitTempRise;
+      const maxTemp = isSensorFail ? 0 : sensor.maxTemp;
+      const tempRise = isSensorFail ? 0 : Number((maxTemp - ambientTemp).toFixed(1));
+      const pass = !isSensorFail && tempRise <= limitTempRise;
 
       if (pass) passCount++;
       else failCount++;
 
-      if (maxTemp > maxObservedTemp) maxObservedTemp = maxTemp;
-      if (tempRise > maxObservedRise) maxObservedRise = tempRise;
-      totalRise += tempRise;
+      if (!isSensorFail) {
+        if (maxTemp > maxObservedTemp) maxObservedTemp = maxTemp;
+        if (tempRise > maxObservedRise) maxObservedRise = tempRise;
+        totalRise += tempRise;
+      }
 
       return {
         pointId: sensor.id,

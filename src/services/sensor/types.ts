@@ -2,7 +2,7 @@ import type { SensorPoint } from '../../types/test';
 
 export interface ISensorDataService {
   /**
-   * Initializes or resets sensor data to baseline ambient temperature.
+   * Initializes or resets sensor data to baseline ambient temperature for 48 channels.
    */
   initialize(ambientTemp?: number): SensorPoint[];
 
@@ -12,19 +12,7 @@ export interface ISensorDataService {
   getSnapshot(): SensorPoint[];
 
   /**
-   * Updates mock readings for one ticker step.
-   * @param elapsedSeconds Elapsed test duration in seconds
-   * @param ambientTemp Set ambient baseline temperature
+   * Updates sensor points from real hardware Modbus temperature telemetry.
    */
-  tick(elapsedSeconds: number, ambientTemp: number): SensorPoint[];
-
-  /**
-   * Set simulation speed multiplier or pause status.
-   */
-  setSimulationSpeed(multiplier: number): void;
-
-  /**
-   * Get active simulation speed multiplier.
-   */
-  getSimulationSpeed?(): number;
+  updateFromHardware(temperatures: Record<number, number>, ambientTemp?: number): SensorPoint[];
 }

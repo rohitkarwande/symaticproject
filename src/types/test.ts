@@ -37,12 +37,13 @@ export interface TestConfig {
 }
 
 export interface SensorPoint {
-  id: number; // 1 to 32
-  label: string; // "Point 1" ... "Point 32"
+  id: number; // 1 to 48
+  label: string; // "TEMP_1" ... "TEMP_48"
   currentTemp: number;
   maxTemp: number;
   initialTemp: number;
-  status: 'normal' | 'warning' | 'alarm';
+  status: 'normal' | 'warning' | 'alarm' | 'fail';
+  isFailed?: boolean;
 }
 
 export type AlarmSeverity = 'critical' | 'warning' | 'info';

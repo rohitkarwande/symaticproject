@@ -114,14 +114,12 @@ export const Sidebar: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#cbd5e1', fontWeight: 600 }}>
-            <Activity size={14} color={modbusStatus.connected ? '#10b981' : modbusStatus.useSimulator ? '#f59e0b' : '#ef4444'} />
-            {modbusStatus.connected ? 'HMI Online' : modbusStatus.useSimulator ? 'HMI Simulator' : 'HMI Offline'}
+            <Activity size={14} color={modbusStatus.connected ? '#10b981' : '#ef4444'} />
+            {modbusStatus.connected ? 'HMI Online' : 'HMI Offline'}
           </div>
           <p style={{ color: '#64748b', fontSize: '11px', marginTop: '4px', margin: 0 }}>
             {modbusStatus.connected
               ? `Modbus TCP Connected (${modbusStatus.ip})`
-              : modbusStatus.useSimulator
-              ? 'Modbus Simulator Active'
               : 'Modbus Ethernet Disconnected'}
           </p>
         </div>

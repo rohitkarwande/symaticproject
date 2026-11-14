@@ -3,7 +3,6 @@ export interface ModbusConfig {
   port: number;
   slaveId: number;
   pollingIntervalMs: number;
-  useSimulator: boolean;
 }
 
 export interface ModbusAlarms {
@@ -24,13 +23,13 @@ export interface PhaseValues {
 
 export interface ModbusDataPayload {
   connected: boolean;
-  simulatorMode: boolean;
   timestamp: string;
   
-  // 48 RTD Temperature Channels (1..48 in °C)
+  // 48 RTD Temperature Channels (1..48 in °C from Holding Registers 1..48)
   temperatures: Record<number, number>;
+  rawTemperatures?: Record<number, number>;
   
-  // Phase Measurements (Float32 values in V & A)
+  // Phase Measurements (Float32 values in A from Holding Registers 49, 51, 53)
   voltages: PhaseValues;
   currents: PhaseValues;
   outputCurrents: PhaseValues;
@@ -42,6 +41,7 @@ export interface ModbusDataPayload {
   
   // Alarm Bits
   alarms: ModbusAlarms;
+  rawRegisters?: Record<number, number>;
   
   // HMI Text String Parameters
   customerName?: string;
@@ -56,7 +56,6 @@ export interface ModbusStatus {
   ip: string;
   port: number;
   slaveId: number;
-  useSimulator: boolean;
   lastPollTimestamp?: string;
   error?: string;
 }
