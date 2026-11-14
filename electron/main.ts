@@ -100,7 +100,7 @@ function createWindow() {
   });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/';
-  const isDev = process.env.NODE_ENV === 'development' || true;
+  const isDev = !app.isPackaged && (process.env.NODE_ENV === 'development' || !!process.env.VITE_DEV_SERVER_URL);
 
   if (isDev) {
     mainWindow.loadURL(devUrl);

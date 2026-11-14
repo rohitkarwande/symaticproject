@@ -183,7 +183,7 @@ export const TestPreview: React.FC = () => {
               alignItems: 'flex-start',
             }}
           >
-            <AlertCircle size={16} color="#3b82f6" style={{ shrink: 0, marginTop: '2px' }} />
+            <AlertCircle size={16} color="#3b82f6" style={{ flexShrink: 0, marginTop: '2px' }} />
             <div>
               <strong style={{ color: '#f8fafc' }}>Automated Logging Ready:</strong> Clicking START TEST will launch the 32-sensor polling cycle and record temperature logs every 1 minute into the local SQLite store.
             </div>

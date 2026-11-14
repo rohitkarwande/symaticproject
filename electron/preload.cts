@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     disconnect: () => ipcRenderer.invoke('modbus:disconnect'),
     getStatus: () => ipcRenderer.invoke('modbus:getStatus'),
     writeCoil: (address: number, state: boolean) => ipcRenderer.invoke('modbus:writeCoil', address, state),
+    writeCoilStatus: (address: number, state: boolean) => ipcRenderer.invoke('modbus:writeCoilStatus', address, state),
     writeRegister: (address: number, value: number) => ipcRenderer.invoke('modbus:writeRegister', address, value),
     writeMultipleRegisters: (startAddress: number, registers: number[]) =>
       ipcRenderer.invoke('modbus:writeMultipleRegisters', startAddress, registers),
