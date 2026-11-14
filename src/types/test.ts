@@ -15,12 +15,15 @@ export interface EquipmentDetails {
 }
 
 export interface TestSpecification {
-  ratedVoltage: number | string;
-  ratedCurrent: number | string;
   testCurrent: number | string;
-  ambientTemp: number | string;
   testDurationHours: number | string; // 1 to 24 hours
-  limitTempRise: number | string; // Acceptance Criteria limit in °C
+  sensorCount: number | string; // Number of active sensors (1 to 48)
+  logIntervalMinutes: number | string; // Report data logging interval in minutes (e.g. 5)
+  // Optional / internal defaults for backward compatibility
+  ratedVoltage?: number | string;
+  ratedCurrent?: number | string;
+  ambientTemp?: number | string;
+  limitTempRise?: number | string; // Acceptance Criteria limit in °C
 }
 
 export interface TestObjectDetails {
@@ -75,6 +78,11 @@ export interface TemperatureLogRow {
   timestamp: string;
   elapsedSeconds: number;
   temperatures: Record<number, number>; // pointId -> temperature
+  currents?: {
+    r: number;
+    y: number;
+    b: number;
+  };
 }
 
 export type TestStatus = 'idle' | 'configuring' | 'preview' | 'running' | 'paused' | 'completed' | 'cancelled';

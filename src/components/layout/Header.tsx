@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Activity, Bell, Clock, Cpu, Network, RefreshCw, Sliders, Settings as SettingsIcon, X } from 'lucide-react';
 import { useTestContext } from '../../context/TestContext';
+import symaticLogo from '../../assets/symatic_logo.jpg';
 
 export const Header: React.FC = () => {
   const { activeSession, isTestActive, activeAlarms, modbusStatus, connectModbus, disconnectModbus, setActiveTab } = useTestContext();
@@ -57,29 +58,24 @@ export const Header: React.FC = () => {
     >
       {/* Brand & Logo */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-        <div
+        <img
+          src={symaticLogo}
+          alt="Symatic Logo"
           style={{
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            padding: '6px 12px',
+            height: '46px',
+            width: 'auto',
+            objectFit: 'contain',
             borderRadius: '4px',
-            fontWeight: 800,
-            fontSize: '16px',
-            letterSpacing: '1px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
+            backgroundColor: '#ffffff',
+            padding: '2px',
           }}
-        >
-          <Cpu size={20} />
-          SYMATIC
-        </div>
+        />
         <div>
           <h1 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
-            SYMATIC ENGINEERING PVT LTD
+            Temperature Rise Test System
           </h1>
           <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Temperature Rise Test System — Industrial Operations
+            Industrial Operations & QA Verification
           </p>
         </div>
       </div>

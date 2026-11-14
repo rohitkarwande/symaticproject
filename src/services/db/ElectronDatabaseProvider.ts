@@ -11,9 +11,16 @@ export class ElectronDatabaseProvider implements IDatabaseProvider {
     return testId;
   }
 
-  public async logTemperatureRow(testId: string, elapsedSeconds: number, timestamp: string, temps: Record<number, number>): Promise<void> {
+  public async logTemperatureRow(
+    testId: string,
+    elapsedSeconds: number,
+    timestamp: string,
+    temps: Record<number, number>,
+    sensorCount?: number,
+    currents?: { r: number; y: number; b: number }
+  ): Promise<void> {
     if (window.electronAPI?.db) {
-      await window.electronAPI.db.logTemperatureRow(testId, elapsedSeconds, timestamp, temps);
+      await window.electronAPI.db.logTemperatureRow(testId, elapsedSeconds, timestamp, temps, sensorCount, currents);
     }
   }
 

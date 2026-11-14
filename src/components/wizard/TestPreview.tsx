@@ -115,20 +115,8 @@ export const TestPreview: React.FC = () => {
           <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
             <tbody>
               <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '8px 0', color: '#94a3b8', width: '40%' }}>Rated Voltage:</td>
-                <td style={{ padding: '8px 0', fontWeight: 600, color: '#f8fafc' }}>{draftConfig.specification.ratedVoltage} V</td>
-              </tr>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '8px 0', color: '#94a3b8' }}>Rated Current:</td>
-                <td style={{ padding: '8px 0', fontWeight: 600, color: '#f8fafc' }}>{draftConfig.specification.ratedCurrent} A</td>
-              </tr>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '8px 0', color: '#94a3b8' }}>Test Current Setpoint:</td>
+                <td style={{ padding: '8px 0', color: '#94a3b8', width: '45%' }}>Test Current Setpoint:</td>
                 <td style={{ padding: '8px 0', fontWeight: 600, color: '#3b82f6' }}>{draftConfig.specification.testCurrent} A</td>
-              </tr>
-              <tr style={{ borderBottom: '1px solid #334155' }}>
-                <td style={{ padding: '8px 0', color: '#94a3b8' }}>Ambient Temperature:</td>
-                <td style={{ padding: '8px 0', fontWeight: 600, color: '#f8fafc' }}>{draftConfig.specification.ambientTemp} °C</td>
               </tr>
               <tr style={{ borderBottom: '1px solid #334155' }}>
                 <td style={{ padding: '8px 0', color: '#94a3b8' }}>Configured Duration:</td>
@@ -136,10 +124,16 @@ export const TestPreview: React.FC = () => {
                   {draftConfig.specification.testDurationHours} Hour(s)
                 </td>
               </tr>
+              <tr style={{ borderBottom: '1px solid #334155' }}>
+                <td style={{ padding: '8px 0', color: '#94a3b8' }}>Active Sensors:</td>
+                <td style={{ padding: '8px 0', fontWeight: 600, color: '#10b981' }}>
+                  {draftConfig.specification.sensorCount || 48} Channel(s) (TEMP_1 .. TEMP_{draftConfig.specification.sensorCount || 48})
+                </td>
+              </tr>
               <tr>
-                <td style={{ padding: '8px 0', color: '#94a3b8' }}>Acceptance Limit Rise:</td>
-                <td style={{ padding: '8px 0', fontWeight: 700, color: '#f8fafc' }}>
-                  ΔT ≤ {draftConfig.specification.limitTempRise} °C
+                <td style={{ padding: '8px 0', color: '#94a3b8' }}>Report Logging Interval:</td>
+                <td style={{ padding: '8px 0', fontWeight: 600, color: '#f8fafc' }}>
+                  Every {draftConfig.specification.logIntervalMinutes || 1} Minute(s)
                 </td>
               </tr>
             </tbody>
@@ -185,7 +179,7 @@ export const TestPreview: React.FC = () => {
           >
             <AlertCircle size={16} color="#3b82f6" style={{ flexShrink: 0, marginTop: '2px' }} />
             <div>
-              <strong style={{ color: '#f8fafc' }}>Automated Logging Ready:</strong> Clicking START TEST will launch the 32-sensor polling cycle and record temperature logs every 1 minute into the local SQLite store.
+              <strong style={{ color: '#f8fafc' }}>Automated Logging Ready:</strong> Clicking START TEST will launch live sensor monitoring (polling hardware every 500ms) and record temperature logs for report every {draftConfig.specification.logIntervalMinutes || 1} minute(s) into the local SQLite store.
             </div>
           </div>
         </div>

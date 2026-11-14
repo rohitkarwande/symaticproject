@@ -28,10 +28,18 @@ export class TemperatureLogger {
   public startLogging(
     testId: string,
     getSensors: () => SensorPoint[],
-    getElapsedSeconds: () => number
+    getElapsedSeconds: () => number,
+    logIntervalMinutes: number = 1,
+    sensorCount: number = 48,
+    getCurrents?: () => { r: number; y: number; b: number }
   ) {
     this.stopLogging();
+    this.logIntervalSeconds = Math.max(1, Math.round((logIntervalMinutes || 1) * 60));
     this.countdownSeconds = this.logIntervalSeconds;
+
+    if (this.onCountdownTickCallback) {
+      this.onCountdownTickCallback(this.countdownSeconds);
+    }
 
     this.timerId = setInterval(async () => {
       this.countdownSeconds -= 1;
@@ -43,24 +51,28 @@ export class TemperatureLogger {
       if (this.countdownSeconds <= 0) {
         this.countdownSeconds = this.logIntervalSeconds;
 
-        const currentSensors = getSensors();
+        const allSensors = getSensors();
+        const activeSensors = allSensors.filter((s) => s.id <= sensorCount);
         const elapsed = getElapsedSeconds();
         const timestamp = new Date().toLocaleTimeString();
 
-        const tempMap = currentSensors.reduce((acc, curr) => {
+        const tempMap = activeSensors.reduce((acc, curr) => {
           acc[curr.id] = curr.currentTemp;
           return acc;
         }, {} as Record<number, number>);
+
+        const phaseCurrents = getCurrents ? getCurrents() : { r: 0, y: 0, b: 0 };
 
         const logRow: TemperatureLogRow = {
           timestamp,
           elapsedSeconds: elapsed,
           temperatures: tempMap,
+          currents: phaseCurrents,
         };
 
         // Commit to database
         const dbProvider = getDatabaseProvider();
-        await dbProvider.logTemperatureRow(testId, elapsed, timestamp, tempMap);
+        await dbProvider.logTemperatureRow(testId, elapsed, timestamp, tempMap, sensorCount, phaseCurrents);
 
         if (this.onLogCommittedCallback) {
           this.onLogCommittedCallback(logRow);

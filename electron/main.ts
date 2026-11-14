@@ -15,8 +15,8 @@ function registerIpcHandlers() {
     return sqliteDbInstance.createTestSession(config, testId, durationSeconds);
   });
 
-  ipcMain.handle('db:logTemperatureRow', async (_evt, testId, elapsedSeconds, timestamp, temps) => {
-    return sqliteDbInstance.logTemperatureRow(testId, elapsedSeconds, timestamp, temps);
+  ipcMain.handle('db:logTemperatureRow', async (_evt, testId, elapsedSeconds, timestamp, temps, sensorCount, currents) => {
+    return sqliteDbInstance.logTemperatureRow(testId, elapsedSeconds, timestamp, temps, sensorCount, currents);
   });
 
   ipcMain.handle('db:saveAlarmEvent', async (_evt, event) => {

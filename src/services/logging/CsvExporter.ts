@@ -1,39 +1,36 @@
 import type { TestSession } from '../../types/test';
+import { formatTimeOnly } from '../../utils/formatTime';
 
 export function generateTemperatureCsv(session: TestSession): string {
+  const sensorCount = Math.min(48, Math.max(1, Number(session.config?.specification?.sensorCount) || session.finalResults?.pointResults.length || 48));
   const headers = [
-    'Test ID',
-    'Elapsed Seconds',
-    'Elapsed Time',
-    'Timestamp',
-    ...Array.from({ length: 32 }, (_, i) => `Point ${i + 1} (°C)`),
+    'Time',
+    'R Current (A)',
+    'Y Current (A)',
+    'B Current (A)',
+    ...Array.from({ length: sensorCount }, (_, i) => `TEMP_${i + 1} (°C)`),
   ];
 
   const rows: string[] = [headers.join(',')];
 
   let logs = session.temperatureLogs;
 
-  // Fallback: If no minute rows logged yet (e.g. test ended early or loaded from summary),
-  // construct initial baseline and peak temperature rows from pointResults / sensors.
+  // Fallback: If no interval rows logged yet, construct baseline
   if (!logs || logs.length === 0) {
     const ambient = Number(session.config?.specification?.ambientTemp) || 25;
     const initialTemps: Record<number, number> = {};
-    const peakTemps: Record<number, number> = {};
 
     if (session.finalResults?.pointResults) {
       session.finalResults.pointResults.forEach((pt) => {
         initialTemps[pt.pointId] = pt.initialTemp;
-        peakTemps[pt.pointId] = pt.maxTemp;
       });
     } else if (session.sensors && session.sensors.length > 0) {
       session.sensors.forEach((s) => {
         initialTemps[s.id] = s.initialTemp;
-        peakTemps[s.id] = s.maxTemp;
       });
     } else {
-      for (let i = 1; i <= 32; i++) {
+      for (let i = 1; i <= sensorCount; i++) {
         initialTemps[i] = ambient;
-        peakTemps[i] = ambient + 35.0 + (i % 5) * 2;
       }
     }
 
@@ -42,31 +39,26 @@ export function generateTemperatureCsv(session: TestSession): string {
         elapsedSeconds: 0,
         timestamp: session.startTimestamp || new Date().toLocaleTimeString(),
         temperatures: initialTemps,
-      },
-      {
-        elapsedSeconds: session.elapsedSeconds || session.durationSeconds || 7200,
-        timestamp: session.endTimestamp || new Date().toLocaleTimeString(),
-        temperatures: peakTemps,
+        currents: { r: 0, y: 0, b: 0 },
       },
     ];
   }
 
   logs.forEach((log) => {
-    const hrs = Math.floor(log.elapsedSeconds / 3600);
-    const mins = Math.floor((log.elapsedSeconds % 3600) / 60);
-    const secs = log.elapsedSeconds % 60;
-    const formattedTime = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    const rCurrent = log.currents?.r !== undefined ? Number(log.currents.r).toFixed(2) : '0.00';
+    const yCurrent = log.currents?.y !== undefined ? Number(log.currents.y).toFixed(2) : '0.00';
+    const bCurrent = log.currents?.b !== undefined ? Number(log.currents.b).toFixed(2) : '0.00';
 
-    const tempValues = Array.from({ length: 32 }, (_, i) => {
+    const tempValues = Array.from({ length: sensorCount }, (_, i) => {
       const val = log.temperatures[i + 1];
       return val !== undefined && val !== null ? Number(val).toFixed(1) : '';
     });
 
     const row = [
-      session.testId,
-      log.elapsedSeconds,
-      formattedTime,
-      `"${log.timestamp}"`,
+      `"${formatTimeOnly(log.timestamp)}"`,
+      rCurrent,
+      yCurrent,
+      bCurrent,
       ...tempValues,
     ];
 

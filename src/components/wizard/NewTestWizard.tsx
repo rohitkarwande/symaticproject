@@ -26,15 +26,12 @@ export const NewTestWizard: React.FC = () => {
 
   // Real-time Auto-Sync test specification parameters to ModSim32 (Address 201+)
   useEffect(() => {
-    const v = Number(draftConfig.specification.ratedVoltage);
-    const r = Number(draftConfig.specification.ratedCurrent);
     const t = Number(draftConfig.specification.testCurrent);
-
-    if (isNaN(v) || isNaN(r) || isNaN(t) || v <= 0) return;
+    if (isNaN(t) || t <= 0) return;
 
     const timer = setTimeout(() => {
       writeTestSpecificationToModbus(
-        { ratedVoltage: v, ratedCurrent: r, testCurrent: t },
+        { ratedVoltage: 0, ratedCurrent: 0, testCurrent: t },
         201,
         'float',
         false
@@ -42,11 +39,7 @@ export const NewTestWizard: React.FC = () => {
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [
-    draftConfig.specification.ratedVoltage,
-    draftConfig.specification.ratedCurrent,
-    draftConfig.specification.testCurrent,
-  ]);
+  }, [draftConfig.specification.testCurrent]);
 
   const [customerErrors, setCustomerErrors] = useState<ValidationErrors<CustomerDetails>>({});
   const [equipmentErrors, setEquipmentErrors] = useState<ValidationErrors<EquipmentDetails>>({});
@@ -71,12 +64,9 @@ export const NewTestWizard: React.FC = () => {
     calibrationDueDate: { field: 'calibrationDueDate', label: 'Calibration Due Date', required: true, isDate: true },
   };
 
-  // 3. Specification Rules (Crucial Duration 1-24 validation)
+  // 3. Specification Rules: testCurrent, testDurationHours, sensorCount, logIntervalMinutes
   const specRules: Record<keyof TestSpecification, ValidationRule> = {
-    ratedVoltage: { field: 'ratedVoltage', label: 'Rated Voltage (V)', required: true, numeric: true, positiveOnly: true },
-    ratedCurrent: { field: 'ratedCurrent', label: 'Rated Current (A)', required: true, numeric: true, positiveOnly: true },
     testCurrent: { field: 'testCurrent', label: 'Test Current (A)', required: true, numeric: true, positiveOnly: true },
-    ambientTemp: { field: 'ambientTemp', label: 'Ambient Temperature (°C)', required: true, numeric: true, min: 0, max: 60 },
     testDurationHours: {
       field: 'testDurationHours',
       label: 'Test Duration (Hours)',
@@ -92,7 +82,41 @@ export const NewTestWizard: React.FC = () => {
         return null;
       },
     },
-    limitTempRise: { field: 'limitTempRise', label: 'Acceptance Limit Temp Rise (°C)', required: true, numeric: true, min: 10, max: 150 },
+    sensorCount: {
+      field: 'sensorCount',
+      label: 'No. of Sensors (1 - 48)',
+      required: true,
+      numeric: true,
+      integerOnly: true,
+      min: 1,
+      max: 48,
+      customValidation: (val) => {
+        const num = Number(val);
+        if (isNaN(num) || num < 1 || num > 48 || !Number.isInteger(num)) {
+          return 'No. of sensors must be an integer between 1 and 48.';
+        }
+        return null;
+      },
+    },
+    logIntervalMinutes: {
+      field: 'logIntervalMinutes',
+      label: 'Data Logging Interval (Minutes)',
+      required: true,
+      numeric: true,
+      min: 0.1,
+      max: 1440,
+      customValidation: (val) => {
+        const num = Number(val);
+        if (isNaN(num) || num <= 0) {
+          return 'Logging interval must be greater than 0 minutes.';
+        }
+        return null;
+      },
+    },
+    ratedVoltage: { field: 'ratedVoltage', label: 'Rated Voltage' },
+    ratedCurrent: { field: 'ratedCurrent', label: 'Rated Current' },
+    ambientTemp: { field: 'ambientTemp', label: 'Ambient Temperature' },
+    limitTempRise: { field: 'limitTempRise', label: 'Limit Temp Rise' },
   };
 
   // 4. Test Object Rules
@@ -143,7 +167,7 @@ export const NewTestWizard: React.FC = () => {
           Configure New Temperature Rise Test
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
-          Step-by-step form digitization workflow for Symatic Engineering test certification.
+          Step-by-step form digitization workflow for test certification.
         </p>
       </div>
 
@@ -400,38 +424,6 @@ export const NewTestWizard: React.FC = () => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div className="form-group">
                 <label className="form-label">
-                  Rated Voltage (V) <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  className={`form-input ${specErrors.ratedVoltage ? 'invalid' : ''}`}
-                  value={draftConfig.specification.ratedVoltage}
-                  onChange={(e) => updateDraftConfig('specification', { ratedVoltage: e.target.value })}
-                />
-                {specErrors.ratedVoltage && (
-                  <div className="form-error-msg">{specErrors.ratedVoltage}</div>
-                )}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  Rated Current (A) <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  className={`form-input ${specErrors.ratedCurrent ? 'invalid' : ''}`}
-                  value={draftConfig.specification.ratedCurrent}
-                  onChange={(e) => updateDraftConfig('specification', { ratedCurrent: e.target.value })}
-                />
-                {specErrors.ratedCurrent && (
-                  <div className="form-error-msg">{specErrors.ratedCurrent}</div>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div className="form-group">
-                <label className="form-label">
                   Test Current (A) <span className="required">*</span>
                 </label>
                 <input
@@ -439,30 +431,16 @@ export const NewTestWizard: React.FC = () => {
                   className={`form-input ${specErrors.testCurrent ? 'invalid' : ''}`}
                   value={draftConfig.specification.testCurrent}
                   onChange={(e) => updateDraftConfig('specification', { testCurrent: e.target.value })}
+                  placeholder="e.g. 2000"
                 />
                 {specErrors.testCurrent && (
                   <div className="form-error-msg">{specErrors.testCurrent}</div>
                 )}
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  Target injection current for thermal equilibrium testing.
+                </span>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">
-                  Ambient Temperature (°C) <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  className={`form-input ${specErrors.ambientTemp ? 'invalid' : ''}`}
-                  value={draftConfig.specification.ambientTemp}
-                  onChange={(e) => updateDraftConfig('specification', { ambientTemp: e.target.value })}
-                />
-                {specErrors.ambientTemp && (
-                  <div className="form-error-msg">{specErrors.ambientTemp}</div>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div className="form-group">
                 <label className="form-label">
                   Test Duration (Hours: 1 - 24) <span className="required">*</span>
@@ -471,28 +449,62 @@ export const NewTestWizard: React.FC = () => {
                   type="number"
                   min="1"
                   max="24"
+                  step="0.5"
                   className={`form-input ${specErrors.testDurationHours ? 'invalid' : ''}`}
                   value={draftConfig.specification.testDurationHours}
                   onChange={(e) => updateDraftConfig('specification', { testDurationHours: e.target.value })}
+                  placeholder="e.g. 2"
                 />
                 {specErrors.testDurationHours && (
                   <div className="form-error-msg">{specErrors.testDurationHours}</div>
                 )}
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  Standard temperature rise test duration (1 to 24 hours).
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '8px' }}>
+              <div className="form-group">
+                <label className="form-label">
+                  No. of Sensors (1 - 48) <span className="required">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="48"
+                  className={`form-input ${specErrors.sensorCount ? 'invalid' : ''}`}
+                  value={draftConfig.specification.sensorCount}
+                  onChange={(e) => updateDraftConfig('specification', { sensorCount: e.target.value })}
+                  placeholder="e.g. 48"
+                />
+                {specErrors.sensorCount && (
+                  <div className="form-error-msg">{specErrors.sensorCount}</div>
+                )}
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  Active sensor channels. Entering 5 shows only TEMP_1..TEMP_5 on dashboard & report logs.
+                </span>
               </div>
 
               <div className="form-group">
                 <label className="form-label">
-                  Acceptance Limit Rise (°C) <span className="required">*</span>
+                  Data Logging Interval (Minutes) <span className="required">*</span>
                 </label>
                 <input
                   type="number"
-                  className={`form-input ${specErrors.limitTempRise ? 'invalid' : ''}`}
-                  value={draftConfig.specification.limitTempRise}
-                  onChange={(e) => updateDraftConfig('specification', { limitTempRise: e.target.value })}
+                  min="0.1"
+                  step="1"
+                  className={`form-input ${specErrors.logIntervalMinutes ? 'invalid' : ''}`}
+                  value={draftConfig.specification.logIntervalMinutes}
+                  onChange={(e) => updateDraftConfig('specification', { logIntervalMinutes: e.target.value })}
+                  placeholder="e.g. 5"
                 />
-                {specErrors.limitTempRise && (
-                  <div className="form-error-msg">{specErrors.limitTempRise}</div>
+                {specErrors.logIntervalMinutes && (
+                  <div className="form-error-msg">{specErrors.logIntervalMinutes}</div>
                 )}
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  Periodic interval to record data points into database for reports (e.g. 5 mins). Realtime hardware polling runs at 500ms.
+                </span>
               </div>
             </div>
           </div>

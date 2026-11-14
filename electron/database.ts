@@ -30,7 +30,35 @@ export class SQLiteDatabase {
     this.db.exec(`PRAGMA foreign_keys = ON;`);
 
     this.createTables();
+    this.migrateSchema();
     this.seedDefaultAlarms();
+  }
+
+  private migrateSchema() {
+    // Migrate test_specifications table for dynamic sensor count & logging interval
+    try {
+      this.db.exec(`ALTER TABLE test_specifications ADD COLUMN sensor_count INTEGER DEFAULT 48;`);
+    } catch {}
+    try {
+      this.db.exec(`ALTER TABLE test_specifications ADD COLUMN log_interval_minutes REAL DEFAULT 1;`);
+    } catch {}
+
+    // Migrate temperature_logs table for up to 48 channels & phase currents
+    try {
+      this.db.exec(`ALTER TABLE temperature_logs ADD COLUMN current_r REAL DEFAULT 0;`);
+    } catch {}
+    try {
+      this.db.exec(`ALTER TABLE temperature_logs ADD COLUMN current_y REAL DEFAULT 0;`);
+    } catch {}
+    try {
+      this.db.exec(`ALTER TABLE temperature_logs ADD COLUMN current_b REAL DEFAULT 0;`);
+    } catch {}
+
+    for (let i = 33; i <= 48; i++) {
+      try {
+        this.db.exec(`ALTER TABLE temperature_logs ADD COLUMN pt${i} REAL;`);
+      } catch {}
+    }
   }
 
   private createTables() {
@@ -60,12 +88,14 @@ export class SQLiteDatabase {
       -- 3. Test Specifications Table
       CREATE TABLE IF NOT EXISTS test_specifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        rated_voltage REAL NOT NULL,
-        rated_current REAL NOT NULL,
-        test_current REAL NOT NULL,
-        ambient_temp REAL NOT NULL,
-        test_duration_hours REAL NOT NULL,
-        limit_temp_rise REAL NOT NULL
+        rated_voltage REAL NOT NULL DEFAULT 0,
+        rated_current REAL NOT NULL DEFAULT 0,
+        test_current REAL NOT NULL DEFAULT 0,
+        ambient_temp REAL NOT NULL DEFAULT 25,
+        test_duration_hours REAL NOT NULL DEFAULT 1,
+        limit_temp_rise REAL NOT NULL DEFAULT 65,
+        sensor_count INTEGER NOT NULL DEFAULT 48,
+        log_interval_minutes REAL NOT NULL DEFAULT 1
       );
 
       -- 4. Test Objects Table
@@ -97,16 +127,21 @@ export class SQLiteDatabase {
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
 
-      -- 6. Temperature Logs Table (32 Point Channels)
+      -- 6. Temperature Logs Table (48 Point Channels + 3-Phase Currents)
       CREATE TABLE IF NOT EXISTS temperature_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         test_id TEXT NOT NULL REFERENCES tests(test_id) ON DELETE CASCADE,
         elapsed_seconds INTEGER NOT NULL,
         timestamp TEXT NOT NULL,
+        current_r REAL DEFAULT 0,
+        current_y REAL DEFAULT 0,
+        current_b REAL DEFAULT 0,
         pt1 REAL, pt2 REAL, pt3 REAL, pt4 REAL, pt5 REAL, pt6 REAL, pt7 REAL, pt8 REAL,
         pt9 REAL, pt10 REAL, pt11 REAL, pt12 REAL, pt13 REAL, pt14 REAL, pt15 REAL, pt16 REAL,
         pt17 REAL, pt18 REAL, pt19 REAL, pt20 REAL, pt21 REAL, pt22 REAL, pt23 REAL, pt24 REAL,
-        pt25 REAL, pt26 REAL, pt27 REAL, pt28 REAL, pt29 REAL, pt30 REAL, pt31 REAL, pt32 REAL
+        pt25 REAL, pt26 REAL, pt27 REAL, pt28 REAL, pt29 REAL, pt30 REAL, pt31 REAL, pt32 REAL,
+        pt33 REAL, pt34 REAL, pt35 REAL, pt36 REAL, pt37 REAL, pt38 REAL, pt39 REAL, pt40 REAL,
+        pt41 REAL, pt42 REAL, pt43 REAL, pt44 REAL, pt45 REAL, pt46 REAL, pt47 REAL, pt48 REAL
       );
 
       -- 7. Alarms Definition Table
@@ -185,36 +220,39 @@ export class SQLiteDatabase {
       'INSERT INTO customers (customer_name, project_name, address, po_number, serial_number) VALUES (?, ?, ?, ?, ?)'
     );
     const custRes = custStmt.run(
-      config.customer.customerName,
-      config.customer.projectName,
-      config.customer.address,
-      config.customer.poNumber,
-      config.customer.serialNumber
+      config.customer?.customerName || '',
+      config.customer?.projectName || '',
+      config.customer?.address || '',
+      config.customer?.poNumber || '',
+      config.customer?.serialNumber || ''
     );
     const customerId = Number(custRes.lastInsertRowid);
+    console.log(`[SQLite Database] Successfully saved customer: "${config.customer?.customerName}" (ID: ${customerId}) for test session: ${testId}`);
 
     const eqStmt = this.db.prepare(
       'INSERT INTO equipment (equipment_name, model, make, serial_number, calibration_due_date) VALUES (?, ?, ?, ?, ?)'
     );
     const eqRes = eqStmt.run(
-      config.equipment.equipmentName,
-      config.equipment.model,
-      config.equipment.make,
-      config.equipment.serialNumber,
-      config.equipment.calibrationDueDate
+      config.equipment?.equipmentName || '',
+      config.equipment?.model || '',
+      config.equipment?.make || '',
+      config.equipment?.serialNumber || '',
+      config.equipment?.calibrationDueDate || ''
     );
     const equipmentId = Number(eqRes.lastInsertRowid);
 
     const specStmt = this.db.prepare(
-      'INSERT INTO test_specifications (rated_voltage, rated_current, test_current, ambient_temp, test_duration_hours, limit_temp_rise) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO test_specifications (rated_voltage, rated_current, test_current, ambient_temp, test_duration_hours, limit_temp_rise, sensor_count, log_interval_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     const specRes = specStmt.run(
-      Number(config.specification.ratedVoltage),
-      Number(config.specification.ratedCurrent),
-      Number(config.specification.testCurrent),
-      Number(config.specification.ambientTemp),
-      Number(config.specification.testDurationHours),
-      Number(config.specification.limitTempRise)
+      Number(config.specification?.ratedVoltage || 0),
+      Number(config.specification?.ratedCurrent || 0),
+      Number(config.specification?.testCurrent || 0),
+      Number(config.specification?.ambientTemp || 25),
+      Number(config.specification?.testDurationHours || 1),
+      Number(config.specification?.limitTempRise || 65),
+      Number(config.specification?.sensorCount || 48),
+      Number(config.specification?.logIntervalMinutes || 1)
     );
     const specId = Number(specRes.lastInsertRowid);
 
@@ -222,9 +260,9 @@ export class SQLiteDatabase {
       'INSERT INTO test_objects (description, serial_number, sample_quantity) VALUES (?, ?, ?)'
     );
     const objRes = objStmt.run(
-      config.testObject.description,
-      config.testObject.serialNumber,
-      Number(config.testObject.sampleQuantity)
+      config.testObject?.description || '',
+      config.testObject?.serialNumber || '',
+      Number(config.testObject?.sampleQuantity || 1)
     );
     const objectId = Number(objRes.lastInsertRowid);
 
@@ -241,16 +279,37 @@ export class SQLiteDatabase {
     return testId;
   }
 
-  // Insert 1-minute temperature log row (32 channels)
-  public logTemperatureRow(testId: string, elapsedSeconds: number, timestamp: string, temps: Record<number, number>) {
-    const columns = Array.from({ length: 32 }, (_, i) => `pt${i + 1}`).join(', ');
-    const placeholders = Array.from({ length: 32 }, () => '?').join(', ');
+  // Insert periodic temperature log row (supports up to 48 channels + 3-phase currents, filtered by sensorCount)
+  public logTemperatureRow(
+    testId: string,
+    elapsedSeconds: number,
+    timestamp: string,
+    temps: Record<number, number>,
+    sensorCount: number = 48,
+    currents?: { r: number; y: number; b: number }
+  ) {
+    const columns = Array.from({ length: 48 }, (_, i) => `pt${i + 1}`).join(', ');
+    const placeholders = Array.from({ length: 48 }, () => '?').join(', ');
     const stmt = this.db.prepare(
-      `INSERT INTO temperature_logs (test_id, elapsed_seconds, timestamp, ${columns}) VALUES (?, ?, ?, ${placeholders})`
+      `INSERT INTO temperature_logs (test_id, elapsed_seconds, timestamp, current_r, current_y, current_b, ${columns}) VALUES (?, ?, ?, ?, ?, ?, ${placeholders})`
     );
 
-    const tempValues = Array.from({ length: 32 }, (_, i) => temps[i + 1] ?? null);
-    stmt.run(testId, elapsedSeconds, timestamp, ...tempValues);
+    const activeCount = Math.min(48, Math.max(1, Number(sensorCount) || 48));
+    const tempValues = Array.from({ length: 48 }, (_, i) => {
+      const ptId = i + 1;
+      if (ptId > activeCount) return null;
+      return (temps && temps[ptId] !== undefined && temps[ptId] !== null) ? Number(temps[ptId]) : null;
+    });
+
+    stmt.run(
+      testId,
+      elapsedSeconds,
+      timestamp,
+      Number(currents?.r || 0),
+      Number(currents?.y || 0),
+      Number(currents?.b || 0),
+      ...tempValues
+    );
   }
 
   // Insert alarm event
@@ -341,6 +400,8 @@ export class SQLiteDatabase {
         sp.ambient_temp as ambientTemp,
         sp.test_duration_hours as testDurationHours,
         sp.limit_temp_rise as limitTempRise,
+        sp.sensor_count as sensorCount,
+        sp.log_interval_minutes as logIntervalMinutes,
         obj.description as objDescription,
         obj.serial_number as objSerialNumber,
         obj.sample_quantity as sampleQuantity
@@ -354,10 +415,9 @@ export class SQLiteDatabase {
 
     const rows = stmt.all() as any[];
 
+    const logCols = Array.from({ length: 48 }, (_, i) => `pt${i + 1}`).join(', ');
     const logsStmt = this.db.prepare(`
-      SELECT elapsed_seconds, timestamp, 
-             pt1, pt2, pt3, pt4, pt5, pt6, pt7, pt8, pt9, pt10, pt11, pt12, pt13, pt14, pt15, pt16,
-             pt17, pt18, pt19, pt20, pt21, pt22, pt23, pt24, pt25, pt26, pt27, pt28, pt29, pt30, pt31, pt32
+      SELECT elapsed_seconds, timestamp, current_r, current_y, current_b, ${logCols}
       FROM temperature_logs
       WHERE test_id = ?
       ORDER BY elapsed_seconds ASC
@@ -371,15 +431,21 @@ export class SQLiteDatabase {
     `);
 
     return rows.map((r) => {
+      const activeSensorCount = Math.min(48, Math.max(1, Number(r.sensorCount) || 48));
       const logRows = logsStmt.all(r.testId) as any[];
       const temperatureLogs = logRows.map((l) => {
         const temps: Record<number, number> = {};
-        for (let i = 1; i <= 32; i++) {
+        for (let i = 1; i <= activeSensorCount; i++) {
           temps[i] = l[`pt${i}`] !== null ? Number(l[`pt${i}`]) : 0;
         }
         return {
           elapsedSeconds: l.elapsed_seconds,
           timestamp: l.timestamp,
+          currents: {
+            r: Number(l.current_r || 0),
+            y: Number(l.current_y || 0),
+            b: Number(l.current_b || 0),
+          },
           temperatures: temps,
         };
       });
@@ -423,11 +489,13 @@ export class SQLiteDatabase {
             calibrationDueDate: r.calibrationDueDate || '',
           },
           specification: {
+            testCurrent: r.testCurrent || 0,
+            testDurationHours: r.testDurationHours || 1,
+            sensorCount: activeSensorCount,
+            logIntervalMinutes: r.logIntervalMinutes || 1,
             ratedVoltage: r.ratedVoltage || 0,
             ratedCurrent: r.ratedCurrent || 0,
-            testCurrent: r.testCurrent || 0,
             ambientTemp: r.ambientTemp || 25,
-            testDurationHours: r.testDurationHours || 1,
             limitTempRise: r.limitTempRise || 65,
           },
           testObject: {
@@ -442,11 +510,11 @@ export class SQLiteDatabase {
           maxObservedRise: r.maxObservedRise || 0,
           avgRise: r.avgRise || 0,
           ambientTemp: r.ambientTemp || 25,
-          passCount: r.overallPass === 1 ? 32 : 30,
-          failCount: r.overallPass === 1 ? 0 : 2,
-          pointResults: Array.from({ length: 32 }, (_, i) => ({
+          passCount: r.overallPass === 1 ? activeSensorCount : Math.max(0, activeSensorCount - 1),
+          failCount: r.overallPass === 1 ? 0 : 1,
+          pointResults: Array.from({ length: activeSensorCount }, (_, i) => ({
             pointId: i + 1,
-            label: `Point ${i + 1}`,
+            label: `TEMP_${i + 1}`,
             initialTemp: r.ambientTemp || 25,
             maxTemp: (r.ambientTemp || 25) + (r.maxObservedRise || 40),
             tempRise: r.maxObservedRise || 40,

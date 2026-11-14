@@ -6,8 +6,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   db: {
     createTestSession: (config: any, testId: string, durationSeconds: number) =>
       ipcRenderer.invoke('db:createTestSession', config, testId, durationSeconds),
-    logTemperatureRow: (testId: string, elapsedSeconds: number, timestamp: string, temps: any) =>
-      ipcRenderer.invoke('db:logTemperatureRow', testId, elapsedSeconds, timestamp, temps),
+    logTemperatureRow: (testId: string, elapsedSeconds: number, timestamp: string, temps: any, sensorCount?: number, currents?: any) =>
+      ipcRenderer.invoke('db:logTemperatureRow', testId, elapsedSeconds, timestamp, temps, sensorCount, currents),
     saveAlarmEvent: (event: any) => ipcRenderer.invoke('db:saveAlarmEvent', event),
     acknowledgeAlarm: (eventId: string) => ipcRenderer.invoke('db:acknowledgeAlarm', eventId),
     completeTestSession: (testId: string, finalResults: any, observations?: string) =>

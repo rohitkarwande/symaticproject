@@ -10,6 +10,7 @@ import {
   Filter,
   Gauge,
   ZapOff,
+  FileText,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -23,6 +24,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { useTestContext } from '../../context/TestContext';
+import { formatTimeOnly } from '../../utils/formatTime';
 
 export const LiveDashboard: React.FC = () => {
   const {
@@ -42,11 +44,18 @@ export const LiveDashboard: React.FC = () => {
     'all' | '1-12' | '13-24' | '25-36' | '37-48' | 'hotspots'
   >('all');
 
+  const sensorCount = Math.min(48, Math.max(1, Number(activeSession?.config.specification.sensorCount) || 48));
+  const logIntervalMinutes = Math.max(0.1, Number(activeSession?.config.specification.logIntervalMinutes) || 1);
+  const activeSensors = sensors.filter((s) => s.id <= sensorCount);
+
   const formatTime = (totalSec: number): string => {
     const hrs = Math.floor(totalSec / 3600);
     const mins = Math.floor((totalSec % 3600) / 60);
     const secs = totalSec % 60;
-    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    if (hrs > 0) {
+      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
   const handleEndTestConfirm = () => {
@@ -54,7 +63,7 @@ export const LiveDashboard: React.FC = () => {
     endTestSession();
   };
 
-  const filteredSensors = sensors.filter((s) => {
+  const filteredSensors = activeSensors.filter((s) => {
     if (sensorFilterRange === '1-12') return s.id >= 1 && s.id <= 12;
     if (sensorFilterRange === '13-24') return s.id >= 13 && s.id <= 24;
     if (sensorFilterRange === '25-36') return s.id >= 25 && s.id <= 36;
@@ -68,7 +77,10 @@ export const LiveDashboard: React.FC = () => {
       time: log.timestamp,
     };
     Object.entries(log.temperatures).forEach(([ptId, temp]) => {
-      row[`Pt ${ptId}`] = temp;
+      const idNum = Number(ptId);
+      if (idNum <= sensorCount) {
+        row[`TEMP_${idNum}`] = temp;
+      }
     });
     return row;
   }) || [];
@@ -152,8 +164,8 @@ export const LiveDashboard: React.FC = () => {
           </div>
 
           <div style={{ backgroundColor: '#0f172a', padding: '10px 16px', borderRadius: '4px', border: '1px solid #10b981', textAlign: 'center' }}>
-            <div style={{ fontSize: '11px', color: '#10b981', textTransform: 'uppercase', fontWeight: 600 }}>Next DB Log</div>
-            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 700, color: '#10b981' }}>{nextLogCountdown}s</div>
+            <div style={{ fontSize: '11px', color: '#10b981', textTransform: 'uppercase', fontWeight: 600 }}>Next Report Log</div>
+            <div className="font-mono" style={{ fontSize: '18px', fontWeight: 700, color: '#10b981' }}>{formatTime(nextLogCountdown)}</div>
           </div>
 
           <button className="btn btn-danger" onClick={() => setShowEndConfirmModal(true)} style={{ padding: '12px 20px', fontSize: '14px', marginLeft: '12px' }}>
@@ -261,7 +273,7 @@ export const LiveDashboard: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Thermometer size={20} color="#3b82f6" />
             <h3 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
-              48 Temperature Points Matrix (Flexem LW 10..57)
+              {sensorCount} Active Temperature Points (TEMP_1..TEMP_{sensorCount})
             </h3>
             <span style={{ fontSize: '12px', color: '#94a3b8' }}>
               (Ambient Baseline: {ambient}°C | Limit Rise: ΔT ≤ {limitRise}°C)
@@ -271,26 +283,35 @@ export const LiveDashboard: React.FC = () => {
           {/* Sensor Filter Tabs */}
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
             <Filter size={14} color="#94a3b8" />
-            {(['all', '1-12', '13-24', '25-36', '37-48', 'hotspots'] as const).map((rng) => (
-              <button
-                key={rng}
-                onClick={() => setSensorFilterRange(rng)}
-                style={{
-                  padding: '4px 10px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  borderRadius: '3px',
-                  border: '1px solid',
-                  borderColor: sensorFilterRange === rng ? '#2563eb' : '#334155',
-                  backgroundColor: sensorFilterRange === rng ? '#2563eb' : '#0f172a',
-                  color: sensorFilterRange === rng ? '#ffffff' : '#94a3b8',
-                  cursor: 'pointer',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {rng}
-              </button>
-            ))}
+            {[
+              { key: 'all' as const, label: 'ALL', show: true },
+              { key: '1-12' as const, label: '1-12', show: sensorCount > 12 },
+              { key: '13-24' as const, label: '13-24', show: sensorCount >= 13 },
+              { key: '25-36' as const, label: '25-36', show: sensorCount >= 25 },
+              { key: '37-48' as const, label: '37-48', show: sensorCount >= 37 },
+              { key: 'hotspots' as const, label: 'HOTSPOTS', show: true },
+            ]
+              .filter((item) => item.show)
+              .map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => setSensorFilterRange(item.key)}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    borderRadius: '3px',
+                    border: '1px solid',
+                    borderColor: sensorFilterRange === item.key ? '#2563eb' : '#334155',
+                    backgroundColor: sensorFilterRange === item.key ? '#2563eb' : '#0f172a',
+                    color: sensorFilterRange === item.key ? '#ffffff' : '#94a3b8',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
           </div>
         </div>
 
@@ -403,8 +424,8 @@ export const LiveDashboard: React.FC = () => {
             <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
               Temperature Rise Trend Curves (°C)
             </h3>
-            {sensors.length > 0 && (() => {
-              const maxSens = sensors.reduce((prev, curr) => (curr.currentTemp > prev.currentTemp ? curr : prev), sensors[0]);
+            {activeSensors.length > 0 && (() => {
+              const maxSens = activeSensors.reduce((prev, curr) => (curr.currentTemp > prev.currentTemp ? curr : prev), activeSensors[0]);
               return (
                 <span className="badge badge-warning" style={{ fontSize: '11px', padding: '2px 8px' }}>
                   PEAK HOTSPOT: {maxSens.label} ({maxSens.currentTemp.toFixed(1)}°C)
@@ -413,7 +434,7 @@ export const LiveDashboard: React.FC = () => {
             })()}
           </div>
           <span style={{ fontSize: '12px', color: '#94a3b8' }}>
-            Acceptance Threshold: {(ambient + limitRise).toFixed(1)}°C | Sampling: 1 Log / Min
+            Acceptance Threshold: {(ambient + limitRise).toFixed(1)}°C | Sampling: 1 Log / {logIntervalMinutes} Min (Report) | Hardware Poll: 500ms
           </span>
         </div>
 
@@ -429,11 +450,30 @@ export const LiveDashboard: React.FC = () => {
                 />
                 <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
                 <ReferenceLine y={ambient + limitRise} stroke="#ef4444" strokeDasharray="4 4" label={{ value: `Limit (${(ambient + limitRise).toFixed(1)}°C)`, fill: '#ef4444', fontSize: 11 }} />
-                <Line type="monotone" dataKey="Pt 1" stroke="#3b82f6" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="Pt 12" stroke="#10b981" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="Pt 24" stroke="#f59e0b" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="Pt 36" stroke="#ec4899" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="Pt 48" stroke="#8b5cf6" dot={false} strokeWidth={2} />
+                {(() => {
+                  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
+                  const targetSensors = activeSensors.length <= 6
+                    ? activeSensors
+                    : [
+                        activeSensors[0],
+                        activeSensors[Math.floor(activeSensors.length * 0.25)],
+                        activeSensors[Math.floor(activeSensors.length * 0.5)],
+                        activeSensors[Math.floor(activeSensors.length * 0.75)],
+                        activeSensors[activeSensors.length - 1],
+                      ].filter((s, idx, arr) => s && arr.findIndex((x) => x?.id === s?.id) === idx);
+
+                  return targetSensors.map((s, idx) => (
+                    <Line
+                      key={s.id}
+                      type="monotone"
+                      dataKey={s.label}
+                      name={s.label}
+                      stroke={colors[idx % colors.length]}
+                      dot={false}
+                      strokeWidth={2}
+                    />
+                  ));
+                })()}
               </LineChart>
             </ResponsiveContainer>
           ) : (
@@ -453,6 +493,89 @@ export const LiveDashboard: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* PERIODIC LOGGED DATA TABLE (LOG INTERVAL SAMPLES) */}
+      <div className="ind-card" style={{ marginTop: '20px' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '14px',
+            borderBottom: '1px solid #334155',
+            paddingBottom: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <FileText size={18} color="#10b981" />
+            <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
+              Periodic Logged Records (Interval: Every {logIntervalMinutes} min)
+            </h3>
+            <span className="badge badge-normal" style={{ fontSize: '11px', padding: '2px 8px' }}>
+              {activeSession?.temperatureLogs.length || 0} LOGS RECORDED
+            </span>
+          </div>
+          <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
+            Next log in: {formatTime(nextLogCountdown)}
+          </span>
+        </div>
+
+        {activeSession?.temperatureLogs && activeSession.temperatureLogs.length > 0 ? (
+          <div style={{ maxHeight: '340px', overflowY: 'auto', overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', whiteSpace: 'nowrap' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#1e293b', borderBottom: '1px solid #334155', color: '#94a3b8', textTransform: 'uppercase', fontSize: '10px' }}>
+                  <th style={{ padding: '6px 10px', textAlign: 'left', position: 'sticky', top: 0, left: 0, backgroundColor: '#1e293b', zIndex: 2 }}>Time</th>
+                  <th style={{ padding: '6px 10px', textAlign: 'right', color: '#ef4444', position: 'sticky', top: 0, backgroundColor: '#1e293b' }}>R Current (A)</th>
+                  <th style={{ padding: '6px 10px', textAlign: 'right', color: '#eab308', position: 'sticky', top: 0, backgroundColor: '#1e293b' }}>Y Current (A)</th>
+                  <th style={{ padding: '6px 10px', textAlign: 'right', color: '#3b82f6', position: 'sticky', top: 0, backgroundColor: '#1e293b' }}>B Current (A)</th>
+                  {Array.from({ length: sensorCount }, (_, i) => (
+                    <th key={i + 1} style={{ padding: '6px 8px', textAlign: 'right', position: 'sticky', top: 0, backgroundColor: '#1e293b' }}>
+                      TEMP_{i + 1} (°C)
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {activeSession.temperatureLogs.map((log, idx) => {
+                  const rVal = log.currents?.r !== undefined ? Number(log.currents.r).toFixed(2) : (modbusData?.currents.r.toFixed(2) || '0.00');
+                  const yVal = log.currents?.y !== undefined ? Number(log.currents.y).toFixed(2) : (modbusData?.currents.y.toFixed(2) || '0.00');
+                  const bVal = log.currents?.b !== undefined ? Number(log.currents.b).toFixed(2) : (modbusData?.currents.b.toFixed(2) || '0.00');
+                  return (
+                    <tr
+                      key={idx}
+                      style={{
+                        borderBottom: '1px solid #334155',
+                        backgroundColor: idx % 2 === 0 ? '#0f172a' : '#141e33',
+                      }}
+                    >
+                      <td className="font-mono" style={{ padding: '6px 10px', fontWeight: 600, color: '#f8fafc', position: 'sticky', left: 0, backgroundColor: idx % 2 === 0 ? '#0f172a' : '#141e33' }}>
+                        {formatTimeOnly(log.timestamp)}
+                      </td>
+                      <td className="font-mono" style={{ padding: '6px 10px', textAlign: 'right', color: '#ef4444' }}>{rVal}</td>
+                      <td className="font-mono" style={{ padding: '6px 10px', textAlign: 'right', color: '#eab308' }}>{yVal}</td>
+                      <td className="font-mono" style={{ padding: '6px 10px', textAlign: 'right', color: '#3b82f6' }}>{bVal}</td>
+                      {Array.from({ length: sensorCount }, (_, i) => {
+                        const temp = log.temperatures[i + 1];
+                        const tempDisplay = temp !== undefined && temp !== null ? Number(temp).toFixed(1) : '-';
+                        return (
+                          <td key={i + 1} className="font-mono" style={{ padding: '6px 8px', textAlign: 'right', color: '#cbd5e1' }}>
+                            {tempDisplay}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px', backgroundColor: '#0f172a', borderRadius: '4px' }}>
+            No report logs committed yet. First periodic log will record in {formatTime(nextLogCountdown)}.
+          </div>
+        )}
       </div>
 
       {/* END TEST CONFIRMATION MODAL */}

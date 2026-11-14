@@ -543,7 +543,7 @@ export const SettingsView: React.FC = () => {
           <tbody>
             <tr style={{ borderBottom: '1px solid #334155' }}>
               <td style={{ padding: '8px 0', color: '#94a3b8' }}>System Application:</td>
-              <td style={{ padding: '8px 0', fontWeight: 600, color: '#f8fafc' }}>Symatic Temperature Rise Test v1.0</td>
+              <td style={{ padding: '8px 0', fontWeight: 600, color: '#f8fafc' }}>Temperature Rise Test System v1.0</td>
             </tr>
             <tr style={{ borderBottom: '1px solid #334155' }}>
               <td style={{ padding: '8px 0', color: '#94a3b8' }}>Protocol Engine:</td>

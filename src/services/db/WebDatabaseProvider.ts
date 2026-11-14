@@ -40,11 +40,31 @@ export class WebDatabaseProvider implements IDatabaseProvider {
     return testId;
   }
 
-  public async logTemperatureRow(testId: string, elapsedSeconds: number, timestamp: string, temps: Record<number, number>): Promise<void> {
+  public async logTemperatureRow(
+    testId: string,
+    elapsedSeconds: number,
+    timestamp: string,
+    temps: Record<number, number>,
+    sensorCount?: number,
+    currents?: { r: number; y: number; b: number }
+  ): Promise<void> {
     const tests = this.getStoredTests();
     const target = tests.find((t) => t.testId === testId);
     if (target) {
-      target.temperatureLogs.push({ elapsedSeconds, timestamp, temperatures: temps });
+      const filteredTemps: Record<number, number> = {};
+      const maxSens = sensorCount || 48;
+      Object.entries(temps).forEach(([idStr, val]) => {
+        const id = Number(idStr);
+        if (id <= maxSens) {
+          filteredTemps[id] = val;
+        }
+      });
+      target.temperatureLogs.push({
+        elapsedSeconds,
+        timestamp,
+        temperatures: filteredTemps,
+        currents: currents || { r: 0, y: 0, b: 0 },
+      });
       this.saveStoredTests(tests);
     }
   }

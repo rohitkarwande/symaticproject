@@ -17,7 +17,7 @@ const MainContent: React.FC = () => {
   const { activeTab } = useTestContext();
 
   return (
-    <main style={{ flex: 1, backgroundColor: 'var(--bg-main)', overflow: 'hidden', position: 'relative' }}>
+    <main className="app-main-content">
       {activeTab === 'dashboard' && <LiveDashboard />}
       {activeTab === 'new-test' && <NewTestWizard />}
       {activeTab === 'preview' && <TestPreview />}
@@ -36,9 +36,9 @@ const MainContent: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <TestProvider>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw' }}>
+      <div className="app-layout-root">
         <Header />
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div className="app-layout-body">
           <Sidebar />
           <MainContent />
         </div>

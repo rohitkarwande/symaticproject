@@ -191,10 +191,10 @@ export const TestHistoryView: React.FC = () => {
                 <div>
                   <div style={{ fontSize: '11px', color: '#94a3b8' }}>SPECIFICATION</div>
                   <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
-                    Rated: {inspectModalTest.config.specification.ratedCurrent}A | Duration: {inspectModalTest.config.specification.testDurationHours}h
+                    Current: {inspectModalTest.config.specification.testCurrent}A | Duration: {inspectModalTest.config.specification.testDurationHours}h | Sensors: {inspectModalTest.config.specification.sensorCount || 48}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#f59e0b' }}>
-                    Acceptance limit: ΔT ≤ {inspectModalTest.config.specification.limitTempRise}°C
+                  <div style={{ fontSize: '12px', color: '#10b981' }}>
+                    Report Log Interval: {inspectModalTest.config.specification.logIntervalMinutes || 1} min
                   </div>
                 </div>
               </div>

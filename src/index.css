@@ -254,56 +254,216 @@ body {
   gap: 12px;
 }
 
-/* PRINT MEDIA STYLES FOR HIGH-QUALITY PDF / PAPER REPORTS */
+/* Application Layout Classes */
+.app-layout-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+.app-layout-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.app-main-content {
+  flex: 1;
+  background-color: var(--bg-main);
+  overflow: hidden;
+  position: relative;
+}
+
+.report-container {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* PRINT MEDIA STYLES FOR HIGH-QUALITY MULTI-PAGE LANDSCAPE PDF / PAPER REPORTS */
 @media print {
   @page {
-    size: A4 portrait;
-    margin: 8mm 10mm;
+    size: A4 landscape;
+    margin: 8mm 6mm;
   }
 
-  html, body, #root, main, .report-container {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box !important;
+  }
+
+  html,
+  body {
     height: auto !important;
-    min-height: auto !important;
+    min-height: 0 !important;
     max-height: none !important;
     overflow: visible !important;
+    overflow-x: visible !important;
     overflow-y: visible !important;
-    position: static !important;
-    display: block !important;
     background-color: #ffffff !important;
-    color: #000000 !important;
-    font-size: 9pt !important;
+    color: #0f172a !important;
+    font-size: 10pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    position: static !important;
   }
 
-  header, aside, nav, .no-print {
+  #root,
+  .app-layout-root,
+  .app-layout-body,
+  .app-main-content,
+  main,
+  .report-container {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    float: none !important;
+  }
+
+  header,
+  aside,
+  nav,
+  .no-print {
     display: none !important;
   }
 
   .printable-report {
+    display: block !important;
+    position: static !important;
     width: 100% !important;
-    max-width: none !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     background-color: #ffffff !important;
-    color: #000000 !important;
+    color: #0f172a !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
     box-shadow: none !important;
     overflow: visible !important;
+    font-size: 10pt !important;
   }
 
   .printable-report-section {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    break-inside: avoid-page !important;
     margin-bottom: 12px !important;
-    padding: 8px 10px !important;
-    border: 1px solid #94a3b8 !important;
+    padding: 10px 12px !important;
+    border: 1px solid #cbd5e1 !important;
   }
 
-  .printable-report h1,
-  .printable-report h2,
-  .printable-report h3,
-  .printable-report td,
-  .printable-report th {
-    color: #000000 !important;
+  .printable-report-card {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    break-inside: avoid-page !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 10px 12px !important;
+    background-color: #ffffff !important;
+  }
+
+  .printable-report-card table td {
+    font-size: 10pt !important;
+    padding: 3px 0 !important;
+    color: #0f172a !important;
+  }
+
+  .printable-report h1 {
+    font-size: 17pt !important;
+    color: #0f172a !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .printable-report h2 {
+    font-size: 13pt !important;
+    color: #0f172a !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .printable-report h3 {
+    font-size: 11pt !important;
+    color: #1e3a8a !important;
+    margin-bottom: 6px !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    break-after: avoid-page !important;
+  }
+
+  .table-block-header {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    break-after: avoid-page !important;
+  }
+
+  .table-block-table-wrapper {
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+    break-before: avoid-page !important;
+  }
+
+  .printable-table-block {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    break-inside: avoid-page !important;
+    page-break-after: auto !important;
+    break-after: auto !important;
+    margin-bottom: 14px !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 10px 12px !important;
+    width: 100% !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
+    display: block !important;
+  }
+
+  .printable-table-block div {
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  .printable-table-block table {
+    width: 100% !important;
+    table-layout: auto !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+  }
+
+  .printable-table-block thead {
+    display: table-header-group !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .printable-table-block tbody tr:first-child {
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+  }
+
+  .printable-report thead {
+    display: table-header-group !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 
   .printable-report tr {
@@ -313,9 +473,15 @@ body {
 
   .printable-report td,
   .printable-report th {
-    padding: 2px 4px !important;
+    padding: 5px 6px !important;
     border-color: #cbd5e1 !important;
-    font-size: 8.5pt !important;
+    font-size: 10pt !important;
+    color: #0f172a !important;
+  }
+
+  .printable-report th {
+    background-color: #f1f5f9 !important;
+    font-weight: 700 !important;
   }
 
   .printable-report div,
@@ -340,5 +506,6 @@ body {
     border: 1px solid #94a3b8 !important;
     background-color: #ffffff !important;
     color: #000000 !important;
+    font-size: 10pt !important;
   }
 }

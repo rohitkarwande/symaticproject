@@ -91,12 +91,14 @@ const DEFAULT_CONFIG: TestConfig = {
     calibrationDueDate: '2027-06-30',
   },
   specification: {
-    ratedVoltage: 33000,
-    ratedCurrent: 2000,
     testCurrent: 2000,
-    ambientTemp: 28,
     testDurationHours: 2, // Default 2 hours (1-24 valid)
-    limitTempRise: 65, // Acceptance criteria limit 65°C
+    sensorCount: 48, // Default 48 sensors (1 to 48 valid)
+    logIntervalMinutes: 5, // Default 5 mins logging for report
+    ratedVoltage: 0,
+    ratedCurrent: 0,
+    ambientTemp: 25,
+    limitTempRise: 65,
   },
   testObject: {
     description: 'Copper Main Busbar Junction & Contacts Assembly',
@@ -145,7 +147,8 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const ambient = Number(draftConfig.specification.ambientTemp) || 25;
     const initialSensors = sensorService.initialize(ambient);
-    setSensors(initialSensors);
+    const initialCount = Math.min(48, Math.max(1, Number(draftConfig.specification.sensorCount) || 48));
+    setSensors(initialSensors.filter((s) => s.id <= initialCount));
 
     // Fetch tests from database
     dbProvider.getAllTests().then((persistedTests) => {
@@ -182,17 +185,23 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (payload.temperatures) {
           const ambient = Number(draftConfig.specification.ambientTemp) || 25;
           const updated = sensorService.updateFromHardware(payload.temperatures, ambient);
-          setSensors(updated);
 
           // If active test is running, sync sensors into activeSession and evaluate alarms
           setActiveSession((currentSession) => {
+            const activeCount = currentSession
+              ? Math.min(48, Math.max(1, Number(currentSession.config.specification.sensorCount) || 48))
+              : Math.min(48, Math.max(1, Number(draftConfig.specification.sensorCount) || 48));
+
+            const activeSensors = updated.filter((s) => s.id <= activeCount);
+            setSensors(activeSensors);
+
             if (currentSession && currentSession.status === 'running') {
               const sessionAmbient = Number(currentSession.config.specification.ambientTemp) || ambient;
               const limitRise = Number(currentSession.config.specification.limitTempRise) || 65;
-              alarmManagerSingleton.evaluateSensors(currentSession.testId, updated, sessionAmbient, limitRise);
+              alarmManagerSingleton.evaluateSensors(currentSession.testId, activeSensors, sessionAmbient, limitRise);
               return {
                 ...currentSession,
-                sensors: updated,
+                sensors: activeSensors,
               };
             }
             return currentSession;
@@ -326,8 +335,11 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const durationHrs = Number(draftConfig.specification.testDurationHours) || 1;
     const durationSeconds = Math.round(durationHrs * 3600);
     const ambient = Number(draftConfig.specification.ambientTemp) || 25;
+    const sensorCount = Math.min(48, Math.max(1, Number(draftConfig.specification.sensorCount) || 48));
+    const logIntervalMinutes = Math.max(0.1, Number(draftConfig.specification.logIntervalMinutes) || 1);
 
-    const initialSensors = sensorService.initialize(ambient);
+    const allSensors = sensorService.initialize(ambient);
+    const initialSensors = allSensors.filter((s) => s.id <= sensorCount);
     const testId = `TRT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(
       100 + Math.random() * 900
     )}`;
@@ -338,14 +350,16 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return acc;
     }, {} as Record<number, number>);
 
+    const currentPhases = modbusData?.currents || { r: 0, y: 0, b: 0 };
     const initialLogRow: TemperatureLogRow = {
       timestamp: startTimestamp,
       elapsedSeconds: 0,
       temperatures: initialTempMap,
+      currents: currentPhases,
     };
 
     dbProvider.createTestSession(draftConfig, testId, durationSeconds).then(() => {
-      dbProvider.logTemperatureRow(testId, 0, startTimestamp, initialTempMap);
+      dbProvider.logTemperatureRow(testId, 0, startTimestamp, initialTempMap, sensorCount, currentPhases);
     });
 
     const newSession: TestSession = {
@@ -365,6 +379,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSensors(initialSensors);
     setActiveAlarms([]);
     setLastResults(null);
+    setNextLogCountdown(Math.round(logIntervalMinutes * 60));
 
     temperatureLoggerSingleton.setLogCommittedCallback((logRow) => {
       setActiveSession((prev) => {
@@ -379,7 +394,10 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     temperatureLoggerSingleton.startLogging(
       testId,
       () => sensorService.getSnapshot(),
-      () => activeSession?.elapsedSeconds || 0
+      () => activeSession?.elapsedSeconds || 0,
+      logIntervalMinutes,
+      sensorCount,
+      () => modbusData?.currents || { r: 0, y: 0, b: 0 }
     );
 
     setActiveTab('dashboard');
@@ -414,6 +432,8 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const calculateFinalResults = (session: TestSession): FinalTestResults => {
     const ambientTemp = Number(session.config.specification.ambientTemp) || 25;
     const limitTempRise = Number(session.config.specification.limitTempRise) || 65;
+    const sensorCount = Math.min(48, Math.max(1, Number(session.config.specification.sensorCount) || session.sensors.length || 48));
+    const activeSensors = session.sensors.filter((s) => s.id <= sensorCount);
 
     let maxObservedTemp = 0;
     let maxObservedRise = 0;
@@ -421,7 +441,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let passCount = 0;
     let failCount = 0;
 
-    const pointResults: PointTestResult[] = session.sensors.map((sensor) => {
+    const pointResults: PointTestResult[] = activeSensors.map((sensor) => {
       const isSensorFail = sensor.status === 'fail' || sensor.isFailed || sensor.currentTemp >= 30000;
       const initialTemp = sensor.initialTemp;
       const maxTemp = isSensorFail ? 0 : sensor.maxTemp;
@@ -449,7 +469,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     const overallPass = failCount === 0;
-    const avgRise = Number((totalRise / (session.sensors.length || 1)).toFixed(1));
+    const avgRise = Number((totalRise / (activeSensors.length || 1)).toFixed(1));
 
     return {
       overallPass,
