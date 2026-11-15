@@ -8,6 +8,10 @@ import {
   ArrowLeft,
   CheckCircle,
   AlertCircle,
+  CornerDownLeft,
+  WifiOff,
+  RotateCcw,
+  History,
 } from 'lucide-react';
 import { useTestContext } from '../../context/TestContext';
 import { validateFormGroup } from '../../services/validation';
@@ -21,25 +25,49 @@ export const NewTestWizard: React.FC = () => {
     draftConfig,
     updateDraftConfig,
     setActiveTab,
+    writeSetCurrentToModbus,
     writeTestSpecificationToModbus,
+    modbusStatus,
+    connectModbus,
+    clearDraftConfig,
+    restorePreviousConfig,
+    hasPreviousConfig,
   } = useTestContext();
 
-  // Real-time Auto-Sync test specification parameters to ModSim32 (Address 201+)
+  const [currentSyncStatus, setCurrentSyncStatus] = useState<string>('');
+  const [isWritingCurrent, setIsWritingCurrent] = useState<boolean>(false);
+  const [showDisconnectModal, setShowDisconnectModal] = useState<boolean>(!modbusStatus.connected);
+
   useEffect(() => {
-    const t = Number(draftConfig.specification.testCurrent);
-    if (isNaN(t) || t <= 0) return;
+    if (modbusStatus.connected) {
+      setShowDisconnectModal(false);
+    }
+  }, [modbusStatus.connected]);
 
-    const timer = setTimeout(() => {
-      writeTestSpecificationToModbus(
-        { ratedVoltage: 0, ratedCurrent: 0, testCurrent: t },
-        201,
-        'float',
-        false
-      );
-    }, 200);
+  // Manual Trigger: Write testCurrent to Register 4X: 55 ONLY when user clicks Enter Arrow or presses Enter
+  const handleWriteCurrent = async () => {
+    const val = draftConfig.specification.testCurrent;
+    const num = Number(val);
+    if (isNaN(num) || num <= 0) {
+      setCurrentSyncStatus('⚠️ Please enter a valid test current (> 0 A)');
+      return;
+    }
 
-    return () => clearTimeout(timer);
-  }, [draftConfig.specification.testCurrent]);
+    setIsWritingCurrent(true);
+    setCurrentSyncStatus('Writing to 4X: 55...');
+    try {
+      const res = await writeSetCurrentToModbus(num);
+      if (res.success) {
+        setCurrentSyncStatus(`✓ Written ${num.toFixed(1)} A to Register 4X: 55`);
+      } else {
+        setCurrentSyncStatus('❌ Hardware offline / Write failed');
+      }
+    } catch {
+      setCurrentSyncStatus('❌ Write error');
+    } finally {
+      setIsWritingCurrent(false);
+    }
+  };
 
   const [customerErrors, setCustomerErrors] = useState<ValidationErrors<CustomerDetails>>({});
   const [equipmentErrors, setEquipmentErrors] = useState<ValidationErrors<EquipmentDetails>>({});
@@ -161,14 +189,155 @@ export const NewTestWizard: React.FC = () => {
 
   return (
     <div style={{ padding: '24px', height: '100%', overflowY: 'auto' }}>
-      {/* Page Title */}
-      <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
-          Configure New Temperature Rise Test
-        </h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
-          Step-by-step form digitization workflow for test certification.
-        </p>
+      {/* POPUP: MODBUS TCP NOT CONNECTED GUARD */}
+      {showDisconnectModal && !modbusStatus.connected && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            zIndex: 1050,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(3px)',
+          }}
+        >
+          <div
+            className="ind-card"
+            style={{
+              width: '520px',
+              maxWidth: '92vw',
+              padding: '24px',
+              backgroundColor: '#ffffff',
+              borderRadius: '8px',
+              border: '2px solid #f59e0b',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25)',
+              color: '#0f172a',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '16px' }}>
+              <div
+                style={{
+                  backgroundColor: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  borderRadius: '50%',
+                  padding: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#d97706',
+                  flexShrink: 0,
+                }}
+              >
+                <WifiOff size={28} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 6px 0', color: '#b45309' }}>
+                  Hardware Disconnected (Modbus TCP Offline)
+                </h3>
+                <p style={{ fontSize: '13px', color: '#475569', margin: 0, lineHeight: '1.5' }}>
+                  The application is currently <strong>not connected</strong> to the PLC / HMI hardware via Modbus TCP. A live TCP connection is required to transmit test parameters, pulse start coils, and read real-time RTD temperature channels.
+                </p>
+              </div>
+            </div>
+
+            <div
+              style={{
+                backgroundColor: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                borderRadius: '6px',
+                padding: '12px 14px',
+                marginBottom: '20px',
+                fontSize: '12px',
+                color: '#1e40af',
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: '4px' }}>Recommended Steps:</div>
+              <div>
+                1. Navigate to <strong>System Settings</strong> to check your PLC IP Address & Port (configured: <code>{modbusStatus.ip || '192.168.0.200'}:{modbusStatus.port || 502}</code>).
+              </div>
+              <div style={{ marginTop: '2px' }}>
+                2. Click <strong>CONNECT HARDWARE</strong> to establish communication before proceeding with live testing.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setShowDisconnectModal(false);
+                  setActiveTab('settings');
+                }}
+                style={{
+                  padding: '10px 22px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  backgroundColor: '#2563eb',
+                  borderColor: '#1d4ed8',
+                  borderRadius: '6px',
+                }}
+              >
+                <Settings size={16} /> Go to System Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Page Title & Action Bar */}
+      <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0, color: '#0f172a' }}>
+            Configure New Temperature Rise Test
+          </h2>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0 0' }}>
+            Step-by-step form digitization workflow for test certification.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={clearDraftConfig}
+            title="Clear all fields to start with a fresh blank test configuration"
+            style={{ fontSize: '12px', padding: '7px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <RotateCcw size={14} /> Clear Form (Blank)
+          </button>
+          {hasPreviousConfig && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                const ok = restorePreviousConfig();
+                if (ok) setCurrentSyncStatus('✓ Restored previous test parameters');
+              }}
+              title="Populate fields with values entered from your previous test"
+              style={{
+                fontSize: '12px',
+                padding: '7px 14px',
+                borderColor: '#93c5fd',
+                color: '#1d4ed8',
+                backgroundColor: '#eff6ff',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <History size={14} /> Restore Previous Test
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stepper Header */}
@@ -201,7 +370,7 @@ export const NewTestWizard: React.FC = () => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                color: isActive ? '#3b82f6' : isDone ? '#10b981' : '#64748b',
+                color: isActive ? '#2563eb' : isDone ? '#16a34a' : '#64748b',
                 fontWeight: isActive ? 700 : 500,
                 fontSize: '13px',
               }}
@@ -211,8 +380,8 @@ export const NewTestWizard: React.FC = () => {
                   width: '28px',
                   height: '28px',
                   borderRadius: '50%',
-                  backgroundColor: isActive ? '#2563eb' : isDone ? '#064e3b' : '#334155',
-                  color: isActive ? '#ffffff' : isDone ? '#10b981' : '#94a3b8',
+                  backgroundColor: isActive ? '#2563eb' : isDone ? '#dcfce7' : '#e2e8f0',
+                  color: isActive ? '#ffffff' : isDone ? '#16a34a' : '#64748b',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -423,22 +592,82 @@ export const NewTestWizard: React.FC = () => {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div className="form-group">
-                <label className="form-label">
-                  Test Current (A) <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  className={`form-input ${specErrors.testCurrent ? 'invalid' : ''}`}
-                  value={draftConfig.specification.testCurrent}
-                  onChange={(e) => updateDraftConfig('specification', { testCurrent: e.target.value })}
-                  placeholder="e.g. 2000"
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label className="form-label" style={{ margin: 0 }}>
+                    Test Current (A) <span className="required">*</span>
+                  </label>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontFamily: 'monospace',
+                      color: '#34d399',
+                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                      border: '1px solid rgba(16, 185, 129, 0.35)',
+                      padding: '2px 7px',
+                      borderRadius: '3px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    4X: 55 (SET_CURRENT) [R/W]
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                  <input
+                    type="number"
+                    className={`form-input ${specErrors.testCurrent ? 'invalid' : ''}`}
+                    style={{ flex: 1 }}
+                    value={draftConfig.specification.testCurrent}
+                    onChange={(e) => updateDraftConfig('specification', { testCurrent: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleWriteCurrent();
+                      }
+                    }}
+                    placeholder="e.g. 2000"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleWriteCurrent}
+                    disabled={isWritingCurrent}
+                    title="Click or press Enter to write value to Register 4X: 55"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      backgroundColor: '#2563eb',
+                      borderColor: '#1d4ed8',
+                      cursor: isWritingCurrent ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <CornerDownLeft size={16} />
+                    <span>ENTER ↵</span>
+                  </button>
+                </div>
                 {specErrors.testCurrent && (
                   <div className="form-error-msg">{specErrors.testCurrent}</div>
                 )}
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
-                  Target injection current for thermal equilibrium testing.
-                </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    Click <strong>Enter ↵</strong> or press Enter key to write value to Holding Register 4X: 55.
+                  </span>
+                  {currentSyncStatus && (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        color: currentSyncStatus.includes('✓') ? '#16a34a' : currentSyncStatus.includes('⚠️') ? '#d97706' : '#dc2626',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {currentSyncStatus}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="form-group">

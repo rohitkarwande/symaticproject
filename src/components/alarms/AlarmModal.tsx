@@ -55,28 +55,28 @@ export const AlarmModal: React.FC = () => {
             {alarmPopupEvent.alarmName}
           </h3>
 
-          <p style={{ fontSize: '14px', color: '#f8fafc', marginBottom: '14px', lineHeight: '1.4' }}>
+          <p style={{ fontSize: '14px', color: '#0f172a', marginBottom: '14px', lineHeight: '1.4' }}>
             {alarmPopupEvent.description}
           </p>
 
           <div
             style={{
-              backgroundColor: '#0f172a',
-              border: '1px solid #334155',
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
               borderRadius: '4px',
               padding: '10px 14px',
               fontSize: '12px',
-              color: '#94a3b8',
+              color: '#475569',
               display: 'flex',
               justifyContent: 'space-between',
               marginBottom: '16px',
             }}
           >
-            <span>Time: <strong style={{ color: '#f8fafc' }}>{alarmPopupEvent.timestamp}</strong></span>
+            <span>Time: <strong style={{ color: '#0f172a' }}>{alarmPopupEvent.timestamp}</strong></span>
             <span>Severity: <strong style={{ color: isCritical ? '#ef4444' : '#f59e0b', textTransform: 'uppercase' }}>{alarmPopupEvent.severity}</strong></span>
           </div>
 
-          <p style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', margin: '0 0 10px 0' }}>
+          <p style={{ fontSize: '13px', fontWeight: 600, color: '#334155', margin: '0 0 10px 0' }}>
             Operator Action Required — Select how to proceed:
           </p>
         </div>
@@ -87,7 +87,8 @@ export const AlarmModal: React.FC = () => {
             display: 'flex',
             gap: '12px',
             justifyContent: 'flex-end',
-            backgroundColor: '#0f172a',
+            backgroundColor: '#f8fafc',
+            borderTop: '1px solid #bfdbfe',
             padding: '16px 20px',
           }}
         >

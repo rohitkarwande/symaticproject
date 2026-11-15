@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 import { sqliteDbInstance } from './database.js';
 import { modbusTcpServiceSingleton } from './modbusTcpService.js';
 
@@ -55,12 +56,20 @@ function registerIpcHandlers() {
     };
   });
 
+  ipcMain.handle('modbus:readCoils', async (_evt, startAddress: number, quantity: number) => {
+    return modbusTcpServiceSingleton.readCoilsPublic(startAddress, quantity);
+  });
+
   ipcMain.handle('modbus:writeCoil', async (_evt, address: number, state: boolean) => {
     return modbusTcpServiceSingleton.writeCoil(address, state);
   });
 
   ipcMain.handle('modbus:writeCoilStatus', async (_evt, address: number, state: boolean) => {
     return modbusTcpServiceSingleton.writeCoilStatus(address, state);
+  });
+
+  ipcMain.handle('modbus:pulseCoil', async (_evt, address: number, durationMs?: number) => {
+    return modbusTcpServiceSingleton.pulseCoil(address, durationMs || 1000);
   });
 
   ipcMain.handle('modbus:writeRegister', async (_evt, address: number, value: number) => {
@@ -82,6 +91,45 @@ function registerIpcHandlers() {
   ipcMain.handle('modbus:testDiagnostic', async (_evt, ip: string, port: number) => {
     return modbusTcpServiceSingleton.testDiagnostic(ip, port);
   });
+
+  // --- PDF Export IPC Handler (Direct Save to User Downloads) ---
+  ipcMain.handle('app:exportPdf', async (_evt, filename: string) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { success: false, error: 'Application window not available' };
+    }
+
+    try {
+      const pdfBuffer = await mainWindow.webContents.printToPDF({
+        landscape: true,
+        pageSize: 'A4',
+        printBackground: true,
+        margins: {
+          marginType: 'custom',
+          top: 0.25,
+          bottom: 0.25,
+          left: 0.25,
+          right: 0.25,
+        },
+      });
+
+      const downloadsDir = app.getPath('downloads');
+      const safeFilename = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+      const targetPath = path.join(downloadsDir, safeFilename);
+
+      await fs.promises.writeFile(targetPath, pdfBuffer);
+      console.log(`[Export PDF] Successfully saved PDF report to: ${targetPath}`);
+
+      return {
+        success: true,
+        filePath: targetPath,
+        filename: safeFilename,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Export PDF] Failed to export PDF:', msg);
+      return { success: false, error: msg };
+    }
+  });
 }
 
 function createWindow() {
@@ -100,7 +148,7 @@ function createWindow() {
   });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/';
-  const isDev = !app.isPackaged && (process.env.NODE_ENV === 'development' || !!process.env.VITE_DEV_SERVER_URL);
+  const isDev = !app.isPackaged;
 
   if (isDev) {
     mainWindow.loadURL(devUrl);

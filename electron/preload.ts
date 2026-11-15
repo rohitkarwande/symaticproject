@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   appVersion: '1.0.0',
   platform: process.platform,
+  exportPdf: (filename: string) => ipcRenderer.invoke('app:exportPdf', filename),
   db: {
     createTestSession: (config: any, testId: string, durationSeconds: number) =>
       ipcRenderer.invoke('db:createTestSession', config, testId, durationSeconds),
@@ -18,8 +19,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     connect: (config?: any) => ipcRenderer.invoke('modbus:connect', config),
     disconnect: () => ipcRenderer.invoke('modbus:disconnect'),
     getStatus: () => ipcRenderer.invoke('modbus:getStatus'),
+    readCoils: (startAddress: number, quantity: number) =>
+      ipcRenderer.invoke('modbus:readCoils', startAddress, quantity),
     writeCoil: (address: number, state: boolean) => ipcRenderer.invoke('modbus:writeCoil', address, state),
     writeCoilStatus: (address: number, state: boolean) => ipcRenderer.invoke('modbus:writeCoilStatus', address, state),
+    pulseCoil: (address: number, durationMs?: number) => ipcRenderer.invoke('modbus:pulseCoil', address, durationMs),
     writeRegister: (address: number, value: number) => ipcRenderer.invoke('modbus:writeRegister', address, value),
     writeMultipleRegisters: (startAddress: number, registers: number[]) =>
       ipcRenderer.invoke('modbus:writeMultipleRegisters', startAddress, registers),

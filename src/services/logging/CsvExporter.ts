@@ -51,7 +51,9 @@ export function generateTemperatureCsv(session: TestSession): string {
 
     const tempValues = Array.from({ length: sensorCount }, (_, i) => {
       const val = log.temperatures[i + 1];
-      return val !== undefined && val !== null ? Number(val).toFixed(1) : '';
+      if (val === undefined || val === null) return '';
+      const num = Number(val);
+      return num >= 30000 ? 'FAIL' : num.toFixed(1);
     });
 
     const row = [

@@ -20,8 +20,23 @@ export interface ModbusAlarms {
   dimMinR: boolean;
   dimMinY: boolean;
   dimMinB: boolean;
+  dimMaxR?: boolean;
+  dimMaxY?: boolean;
+  dimMaxB?: boolean;
   alarmBit: boolean;
   testOn: boolean;
+  start?: boolean;
+  stop?: boolean;
+  autoManual?: boolean;
+}
+
+export interface DimmerStatus {
+  rDimmerZero: boolean;
+  yDimmerZero: boolean;
+  bDimmerZero: boolean;
+  rDimmerMax: boolean;
+  yDimmerMax: boolean;
+  bDimmerMax: boolean;
 }
 
 export interface ModbusDataPayload {
@@ -37,6 +52,9 @@ export interface ModbusDataPayload {
   ctRange: number;
   alarms: ModbusAlarms;
   rawRegisters?: Record<number, number>;
+  coils?: Record<number | string, boolean>;
+  dimmers?: DimmerStatus;
+  testOn?: boolean;
 }
 
 export class ModbusTcpService extends EventEmitter {
@@ -53,6 +71,7 @@ export class ModbusTcpService extends EventEmitter {
   private pollTimer: NodeJS.Timeout | null = null;
   private isPolling: boolean = false;
   private detectedPduOffset: number | null = null;
+  private detectedCoilPduOffset: number | null = null;
   private pendingRequests = new Map<number, { resolve: (data: Buffer | null) => void; reject: (err: Error) => void }>();
   private receiveBuffer: Buffer = Buffer.alloc(0);
 
@@ -88,6 +107,8 @@ export class ModbusTcpService extends EventEmitter {
         console.log(`[Modbus TCP] Connected to HMI hardware at ${this.config.ip}:${this.config.port}`);
         this.connected = true;
         this.detectedPduOffset = null;
+    this.detectedCoilPduOffset = null;
+        this.detectedCoilPduOffset = null;
         this.socket?.setTimeout(0); // Disable connection idle timeout once established
         this.emit('status', {
           connected: true,
@@ -151,6 +172,7 @@ export class ModbusTcpService extends EventEmitter {
     }
     this.connected = false;
     this.detectedPduOffset = null;
+    this.detectedCoilPduOffset = null;
     this.emit('status', { connected: false });
   }
 
@@ -184,31 +206,32 @@ export class ModbusTcpService extends EventEmitter {
       // Current R Phase_OP_MTR: Holding Register 4X 49 (2 words, 32-bit Float)
       // Current Y Phase_OP_MTR: Holding Register 4X 51 (2 words, 32-bit Float)
       // Current B Phase_OP_MTR: Holding Register 4X 53 (2 words, 32-bit Float)
-      // Total contiguous span: 54 holding registers (108 bytes)
+      // SET_CURRENT: Holding Register 4X 55 (2 words, 32-bit Float)
+      // Total contiguous span: 56 holding registers (112 bytes)
 
       let bulkBuffer: Buffer | null = null;
       let startPdu = this.detectedPduOffset ?? 0;
 
       if (this.detectedPduOffset !== null) {
         // Use cached PDU offset
-        bulkBuffer = await this.readHoldingRegisters(this.detectedPduOffset, 54);
+        bulkBuffer = await this.readHoldingRegisters(this.detectedPduOffset, 56);
       } else {
-        // Auto-detect: Try 1-based PDU address 0 (4X 1 = PDU 0) for 54 registers
-        bulkBuffer = await this.readHoldingRegisters(0, 54);
-        if (bulkBuffer && bulkBuffer.length >= 108) {
+        // Auto-detect: Try 1-based PDU address 0 (4X 1 = PDU 0) for 56 registers
+        bulkBuffer = await this.readHoldingRegisters(0, 56);
+        if (bulkBuffer && bulkBuffer.length >= 112) {
           startPdu = 0;
           this.detectedPduOffset = 0;
         } else {
-          // Try 0-based PDU address 1 (4X 1 = PDU 1) for 54 registers
-          bulkBuffer = await this.readHoldingRegisters(1, 54);
-          if (bulkBuffer && bulkBuffer.length >= 108) {
+          // Try 0-based PDU address 1 (4X 1 = PDU 1) for 56 registers
+          bulkBuffer = await this.readHoldingRegisters(1, 56);
+          if (bulkBuffer && bulkBuffer.length >= 112) {
             startPdu = 1;
             this.detectedPduOffset = 1;
           }
         }
       }
 
-      // If bulk 54-register read failed (e.g. PLC max packet limitation), split into chunks
+      // If bulk 56-register read failed (e.g. PLC max packet limitation), split into chunks
       let tempBuffer: Buffer | null = null;
       let currentBuffer: Buffer | null = null;
 
@@ -223,9 +246,9 @@ export class ModbusTcpService extends EventEmitter {
             this.detectedPduOffset = 1;
           }
         }
-        // Read 6 current registers (Starting at Address 49)
+        // Read 8 registers (Starting at Address 49: R, Y, B currents + SET_CURRENT)
         const currentPdu = (this.detectedPduOffset ?? startPdu) === 0 ? 48 : 49;
-        currentBuffer = await this.readHoldingRegisters(currentPdu, 6);
+        currentBuffer = await this.readHoldingRegisters(currentPdu, 8);
       }
 
       const temps: Record<number, number> = {};
@@ -255,11 +278,12 @@ export class ModbusTcpService extends EventEmitter {
         }
       }
 
-      // Parse 3-Phase Currents (Registers 49, 51, 53 — 2 words each Word-Swapped Float32 CD AB)
-      const cBuf = bulkBuffer ? bulkBuffer.subarray(96, 108) : currentBuffer;
+      // Parse 3-Phase Currents (Registers 49, 51, 53 — 2 words each Word-Swapped Float32 CD AB) and SET_CURRENT (Register 55)
+      const cBuf = bulkBuffer ? bulkBuffer.subarray(96, 112) : currentBuffer;
       let currR = 0;
       let currY = 0;
       let currB = 0;
+      let setpointCurrent = 0;
 
       if (cBuf && cBuf.length >= 12) {
         rawRegs[49] = cBuf.readUInt16BE(0);
@@ -272,6 +296,12 @@ export class ModbusTcpService extends EventEmitter {
         currR = this.parse32BitValue(cBuf, 0);
         currY = this.parse32BitValue(cBuf, 4);
         currB = this.parse32BitValue(cBuf, 8);
+
+        if (cBuf.length >= 16) {
+          rawRegs[55] = cBuf.readUInt16BE(12);
+          rawRegs[56] = cBuf.readUInt16BE(14);
+          setpointCurrent = this.parse32BitValue(cBuf, 12);
+        }
       }
 
       const currents: PhaseValues = {
@@ -279,6 +309,42 @@ export class ModbusTcpService extends EventEmitter {
         y: currY,
         b: currB,
       };
+
+      // --- Read Coils 0X 1..16 (START=1, STOP=2, ALARM_DIM_MIN_R=3, ALARM_DIM_MIN_Y=4, ALARM_DIM_MIN_B=5, DIMMER_MAX_SW_R=6, DIMMER_MAX_SW_Y=7, DIMMER_MAX_SW_B=8, AUTO_MANUAL=9) ---
+      let coilBuffer: Buffer | null = null;
+      if (this.detectedCoilPduOffset !== null) {
+        coilBuffer = await this.readCoils(this.detectedCoilPduOffset, 16);
+      } else {
+        coilBuffer = await this.readCoils(0, 16);
+        if (coilBuffer && coilBuffer.length >= 2) {
+          this.detectedCoilPduOffset = 0;
+        } else {
+          coilBuffer = await this.readCoils(1, 16);
+          if (coilBuffer && coilBuffer.length >= 2) {
+            this.detectedCoilPduOffset = 1;
+          }
+        }
+      }
+
+      const coilsMap: Record<number, boolean> = {};
+      if (coilBuffer && coilBuffer.length >= 1) {
+        for (let i = 0; i < Math.min(16, coilBuffer.length * 8); i++) {
+          const byteIdx = Math.floor(i / 8);
+          const bitIdx = i % 8;
+          coilsMap[i + 1] = Boolean((coilBuffer[byteIdx] >> bitIdx) & 1);
+        }
+      }
+
+      const startCoil = Boolean(coilsMap[1]);
+      const stopCoil = Boolean(coilsMap[2]);
+      const dimMinR = Boolean(coilsMap[3]);
+      const dimMinY = Boolean(coilsMap[4]);
+      const dimMinB = Boolean(coilsMap[5]);
+      const dimMaxR = Boolean(coilsMap[6]);
+      const dimMaxY = Boolean(coilsMap[7]);
+      const dimMaxB = Boolean(coilsMap[8]);
+      const autoManual = Boolean(coilsMap[9]);
+      const testOn = Boolean(coilsMap[10]); // 0X: 10 (TEST_ON)
 
       const payload: ModbusDataPayload = {
         connected: true,
@@ -288,18 +354,47 @@ export class ModbusTcpService extends EventEmitter {
         voltages: { r: 0, y: 0, b: 0 },
         currents,
         outputCurrents: currents,
-        setpointCurrent: 0,
+        setpointCurrent,
         hysteresis: 0,
         ctRange: 2000,
         rawRegisters: rawRegs,
+        testOn, // Coil 0X: 10
+        coils: {
+          ...coilsMap,
+          start: startCoil,
+          stop: stopCoil,
+          dimMinR,
+          dimMinY,
+          dimMinB,
+          dimMaxR,
+          dimMaxY,
+          dimMaxB,
+          autoManual,
+          testOn,
+          10: testOn,
+        },
+        dimmers: {
+          rDimmerZero: dimMinR,
+          yDimmerZero: dimMinY,
+          bDimmerZero: dimMinB,
+          rDimmerMax: dimMaxR,
+          yDimmerMax: dimMaxY,
+          bDimmerMax: dimMaxB,
+        },
         alarms: {
           phaseFail: false,
           thermalOverload: false,
-          dimMinR: false,
-          dimMinY: false,
-          dimMinB: false,
-          alarmBit: false,
-          testOn: true,
+          dimMinR,
+          dimMinY,
+          dimMinB,
+          dimMaxR,
+          dimMaxY,
+          dimMaxB,
+          alarmBit: dimMinR || dimMinY || dimMinB || dimMaxR || dimMaxY || dimMaxB,
+          testOn,
+          start: startCoil,
+          stop: stopCoil,
+          autoManual,
         },
       };
 
@@ -490,11 +585,29 @@ export class ModbusTcpService extends EventEmitter {
     });
   }
 
+  public async readCoilsPublic(
+    startAddress: number,
+    quantity: number
+  ): Promise<{ success: boolean; coils: Record<number, boolean>; buffer?: number[] }> {
+    const pduAddress = (this.detectedCoilPduOffset ?? 0) === 1 ? startAddress : (startAddress >= 1 ? startAddress - 1 : startAddress);
+    const buf = await this.readCoils(pduAddress, quantity);
+    if (!buf) {
+      return { success: false, coils: {} };
+    }
+    const coils: Record<number, boolean> = {};
+    for (let i = 0; i < Math.min(quantity, buf.length * 8); i++) {
+      const byteIdx = Math.floor(i / 8);
+      const bitIdx = i % 8;
+      coils[startAddress + i] = Boolean((buf[byteIdx] >> bitIdx) & 1);
+    }
+    return { success: true, coils, buffer: Array.from(buf) };
+  }
+
   public async writeCoilStatus(
     address: number,
     state: boolean
   ): Promise<{ success: boolean; message: string; writtenCoils: { address: number; state: boolean }[] }> {
-    const pduAddress = address >= 1 ? address - 1 : address;
+    const pduAddress = (this.detectedCoilPduOffset ?? 0) === 1 ? address : (address >= 1 ? address - 1 : address);
     const success = await this.writeCoil(pduAddress, state);
 
     const msg = success
@@ -505,6 +618,28 @@ export class ModbusTcpService extends EventEmitter {
       success,
       message: msg,
       writtenCoils: [{ address, state }],
+    };
+  }
+
+  public async pulseCoil(
+    address: number,
+    durationMs: number = 1000
+  ): Promise<{ success: boolean; message: string }> {
+    const pduAddress = (this.detectedCoilPduOffset ?? 0) === 1 ? address : (address >= 1 ? address - 1 : address);
+    // 1. Assert Coil HIGH (1)
+    const onOk = await this.writeCoil(pduAddress, true);
+    // 2. Wait duration (1 second)
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+    // 3. Reset Coil LOW (0)
+    const offOk = await this.writeCoil(pduAddress, false);
+
+    const msg = onOk && offOk
+      ? `✅ Pulsed Coil 0X: ${address} (HIGH for ${durationMs}ms, then reset to LOW)`
+      : `⚠️ Pulsed Coil 0X: ${address} (HIGH: ${onOk ? 'OK' : 'FAIL'}, LOW: ${offOk ? 'OK' : 'FAIL'})`;
+
+    return {
+      success: onOk && offOk,
+      message: msg,
     };
   }
 
@@ -585,9 +720,11 @@ export class ModbusTcpService extends EventEmitter {
     return wordSwap ? [w1, w0] : [w0, w1];
   }
 
-  public async writeFloatRegister(startAddress: number, floatValue: number, wordSwap: boolean = false): Promise<boolean> {
+  public async writeFloatRegister(startAddress: number, floatValue: number, wordSwap: boolean = true): Promise<boolean> {
+    const pduAddress = (this.detectedPduOffset ?? 0) === 1 ? startAddress : (startAddress >= 1 ? startAddress - 1 : startAddress);
     const words = this.floatToRegisters(floatValue, wordSwap);
-    return this.writeMultipleRegisters(startAddress, words);
+    console.log(`[Modbus TCP] Writing Float32 to Register 4X: ${startAddress} (PDU ${pduAddress}): ${floatValue} (WordSwap: ${wordSwap}, Words: [0x${words[0].toString(16)}, 0x${words[1].toString(16)}])`);
+    return this.writeMultipleRegisters(pduAddress, words);
   }
 
   public async writeTestSpecification(

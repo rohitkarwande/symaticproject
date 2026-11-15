@@ -28,6 +28,9 @@ interface TestContextType {
   setDraftConfig: React.Dispatch<React.SetStateAction<TestConfig>>;
   updateDraftConfig: <K extends keyof TestConfig>(section: K, values: Partial<TestConfig[K]>) => void;
   resetWizard: () => void;
+  clearDraftConfig: () => void;
+  restorePreviousConfig: () => boolean;
+  hasPreviousConfig: boolean;
 
   // Active Test state
   activeSession: TestSession | null;
@@ -43,6 +46,7 @@ interface TestContextType {
   acknowledgeAlarm: (eventId: string) => void;
   triggerMockAlarm: (alarmId: number, description?: string) => void;
   nextLogCountdown: number;
+  isLoggingActive: boolean;
 
   // Modbus Hardware Connection State
   modbusStatus: ModbusStatus;
@@ -54,6 +58,22 @@ interface TestContextType {
     address: number,
     state: boolean
   ) => Promise<{ success: boolean; message: string; writtenCoils: { address: number; state: boolean }[] }>;
+  pulseCoilToModbus: (
+    address: number,
+    durationMs?: number
+  ) => Promise<{ success: boolean; message: string }>;
+  readCoilsFromModbus: (
+    startAddress?: number,
+    quantity?: number
+  ) => Promise<{ success: boolean; coils: Record<number, boolean>; buffer?: number[] }>;
+  writeFloatRegisterToModbus: (
+    address: number,
+    value: number,
+    wordSwap?: boolean
+  ) => Promise<boolean>;
+  writeSetCurrentToModbus: (
+    current: number
+  ) => Promise<{ success: boolean; message: string }>;
   writeTestSpecificationToModbus: (
     spec?: { ratedVoltage: number; ratedCurrent: number; testCurrent: number },
     startAddress?: number,
@@ -75,36 +95,53 @@ interface TestContextType {
   cancelNavAway: () => void;
 }
 
-const DEFAULT_CONFIG: TestConfig = {
+const BLANK_CONFIG: TestConfig = {
   customer: {
-    customerName: 'Symatic Industrial Automation Ltd',
-    projectName: 'Substation Transformer Feeder Panel',
-    address: 'Plot 42, GIDC Industrial Estate, Vadodara, Gujarat',
-    poNumber: 'PO-2026-8891',
-    serialNumber: 'CUST-SN-9941',
+    customerName: '',
+    projectName: '',
+    address: '',
+    poNumber: '',
+    serialNumber: '',
   },
   equipment: {
-    equipmentName: '33kV Vacuum Circuit Breaker Panel',
-    model: 'VCB-33-2000A',
-    make: 'Symatic Engineering',
-    serialNumber: 'EQ-2026-VCB-004',
-    calibrationDueDate: '2027-06-30',
+    equipmentName: '',
+    model: '',
+    make: '',
+    serialNumber: '',
+    calibrationDueDate: '',
   },
   specification: {
-    testCurrent: 2000,
-    testDurationHours: 2, // Default 2 hours (1-24 valid)
-    sensorCount: 48, // Default 48 sensors (1 to 48 valid)
-    logIntervalMinutes: 5, // Default 5 mins logging for report
+    testCurrent: '',
+    testDurationHours: 1, // Default 1 hour
+    sensorCount: 48, // Default 48 channels
+    logIntervalMinutes: 1, // Default 1 min logging
     ratedVoltage: 0,
     ratedCurrent: 0,
     ambientTemp: 25,
     limitTempRise: 65,
   },
   testObject: {
-    description: 'Copper Main Busbar Junction & Contacts Assembly',
-    serialNumber: 'TO-BUSBAR-33KV-01',
+    description: '',
+    serialNumber: '',
     sampleQuantity: 1,
   },
+};
+
+const STORAGE_KEY_PREVIOUS_CONFIG = 'symatic_previous_test_config';
+
+const getInitialConfig = (): TestConfig => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_PREVIOUS_CONFIG);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed?.customer && parsed?.equipment && parsed?.specification && parsed?.testObject) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse previous test config from localStorage:', err);
+  }
+  return BLANK_CONFIG;
 };
 
 const TestContext = createContext<TestContextType | undefined>(undefined);
@@ -112,13 +149,21 @@ const TestContext = createContext<TestContextType | undefined>(undefined);
 export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [wizardStep, setWizardStep] = useState<number>(1);
-  const [draftConfig, setDraftConfig] = useState<TestConfig>(DEFAULT_CONFIG);
+  const [draftConfig, setDraftConfig] = useState<TestConfig>(getInitialConfig);
+  const [hasPreviousConfig, setHasPreviousConfig] = useState<boolean>(() => {
+    try {
+      return Boolean(localStorage.getItem(STORAGE_KEY_PREVIOUS_CONFIG));
+    } catch {
+      return false;
+    }
+  });
 
   const [activeSession, setActiveSession] = useState<TestSession | null>(null);
   const [sensors, setSensors] = useState<SensorPoint[]>([]);
   const [activeAlarms, setActiveAlarms] = useState<AlarmEvent[]>([]);
   const [alarmPopupEvent, setAlarmPopupEvent] = useState<AlarmEvent | null>(null);
   const [nextLogCountdown, setNextLogCountdown] = useState<number>(60);
+  const [isLoggingActive, setIsLoggingActive] = useState<boolean>(false);
 
   // Modbus Hardware Connection state
   const [modbusStatus, setModbusStatus] = useState<ModbusStatus>({
@@ -128,6 +173,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     slaveId: 1,
   });
   const [modbusData, setModbusData] = useState<ModbusDataPayload | null>(null);
+  const modbusDataRef = useRef<ModbusDataPayload | null>(null);
 
   const [testHistory, setTestHistory] = useState<TestSession[]>([]);
   const [selectedHistoryTest, setSelectedHistoryTest] = useState<TestSession | null>(null);
@@ -140,6 +186,8 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sensorService = getSensorService();
   const dbProvider = getDatabaseProvider();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const activeSessionRef = useRef<TestSession | null>(null);
+  activeSessionRef.current = activeSession;
 
   const isTestActive = activeSession?.status === 'running';
 
@@ -154,6 +202,12 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     dbProvider.getAllTests().then((persistedTests) => {
       if (persistedTests && persistedTests.length > 0) {
         setTestHistory(persistedTests);
+        if (!localStorage.getItem(STORAGE_KEY_PREVIOUS_CONFIG) && persistedTests[0]?.config) {
+          try {
+            localStorage.setItem(STORAGE_KEY_PREVIOUS_CONFIG, JSON.stringify(persistedTests[0].config));
+            setHasPreviousConfig(true);
+          } catch {}
+        }
       }
     });
 
@@ -163,8 +217,9 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       dbProvider.saveAlarmEvent(evt);
     });
 
-    temperatureLoggerSingleton.setCountdownTickCallback((secs) => {
+    temperatureLoggerSingleton.setCountdownTickCallback((secs, isLoggingActive) => {
       setNextLogCountdown(secs);
+      setIsLoggingActive(isLoggingActive);
     });
 
     // Modbus TCP Listener (Electron environment)
@@ -175,6 +230,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const unsubData = window.electronAPI.modbus.onData((payload: ModbusDataPayload) => {
         setModbusData(payload);
+        modbusDataRef.current = payload;
         setModbusStatus((prev) => ({
           ...prev,
           connected: payload.connected,
@@ -206,6 +262,15 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
             return currentSession;
           });
+        }
+
+        // Evaluate incoming hardware START and STOP coils from PLC (Read support)
+        if (payload.coils) {
+          const isHardwareStop = Boolean(payload.coils.stop || payload.coils[2]);
+          if (isHardwareStop && activeSessionRef.current?.status === 'running') {
+            console.log('[Modbus TCP] Received STOP coil signal from PLC hardware (0X: 2). Ending test session...');
+            endTestSession();
+          }
         }
       });
 
@@ -266,6 +331,51 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   };
 
+  const pulseCoilToModbus = async (address: number, durationMs: number = 1000) => {
+    if (window.electronAPI?.modbus?.pulseCoil) {
+      return await window.electronAPI.modbus.pulseCoil(address, durationMs);
+    } else {
+      await writeCoilStatusToModbus(address, true);
+      await new Promise((r) => setTimeout(r, durationMs));
+      await writeCoilStatusToModbus(address, false);
+      return {
+        success: true,
+        message: `Pulsed coil 0X: ${address} (HIGH for ${durationMs}ms then reset to LOW)`,
+      };
+    }
+  };
+
+  const readCoilsFromModbus = async (startAddress: number = 1, quantity: number = 16) => {
+    if (window.electronAPI?.modbus?.readCoils) {
+      return await window.electronAPI.modbus.readCoils(startAddress, quantity);
+    }
+    return { success: false, coils: {} };
+  };
+
+  const writeFloatRegisterToModbus = async (address: number, value: number, wordSwap: boolean = true) => {
+    if (window.electronAPI?.modbus?.writeFloatRegister) {
+      return await window.electronAPI.modbus.writeFloatRegister(address, value, wordSwap);
+    }
+    return false;
+  };
+
+  const writeSetCurrentToModbus = async (current: number): Promise<{ success: boolean; message: string }> => {
+    if (window.electronAPI?.modbus?.writeFloatRegister) {
+      // SET_CURRENT register is 4X: 55, length 2 words, Word-Swapped Float32 (CD AB)
+      const ok = await window.electronAPI.modbus.writeFloatRegister(55, current, true);
+      return {
+        success: ok,
+        message: ok
+          ? `✅ Successfully written SET_CURRENT to Register 4X: 55: ${current.toFixed(1)} A`
+          : `❌ Failed to write SET_CURRENT to Register 4X: 55 (Hardware offline or not responding)`,
+      };
+    }
+    return {
+      success: false,
+      message: `❌ Desktop Electron environment required for Modbus TCP write`,
+    };
+  };
+
   const writeTestSpecificationToModbus = async (
     spec?: { ratedVoltage: number; ratedCurrent: number; testCurrent: number },
     startAddress: number = 201,
@@ -302,9 +412,40 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }));
   };
 
+  const clearDraftConfig = () => {
+    setWizardStep(1);
+    setDraftConfig(BLANK_CONFIG);
+  };
+
+  const restorePreviousConfig = (): boolean => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PREVIOUS_CONFIG);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.customer && parsed?.equipment && parsed?.specification && parsed?.testObject) {
+          setDraftConfig(parsed);
+          setHasPreviousConfig(true);
+          return true;
+        }
+      }
+    } catch {}
+    if (testHistory.length > 0 && testHistory[0]?.config) {
+      setDraftConfig(testHistory[0].config);
+      try {
+        localStorage.setItem(STORAGE_KEY_PREVIOUS_CONFIG, JSON.stringify(testHistory[0].config));
+        setHasPreviousConfig(true);
+      } catch {}
+      return true;
+    }
+    return false;
+  };
+
   const resetWizard = () => {
     setWizardStep(1);
-    setDraftConfig(DEFAULT_CONFIG);
+    const restored = restorePreviousConfig();
+    if (!restored) {
+      setDraftConfig(BLANK_CONFIG);
+    }
   };
 
   const navigateWithGuard = (targetTab: ActiveTab): boolean => {
@@ -330,7 +471,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPendingNavTab(null);
   };
 
-  // Start Test session with DB persistence & TemperatureLogger
+  // Start Test session with DB persistence & TemperatureLogger (Hardware coils are controlled on Dashboard)
   const startTestSession = () => {
     const durationHrs = Number(draftConfig.specification.testDurationHours) || 1;
     const durationSeconds = Math.round(durationHrs * 3600);
@@ -345,22 +486,15 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     )}`;
 
     const startTimestamp = new Date().toLocaleString();
-    const initialTempMap = initialSensors.reduce((acc, curr) => {
-      acc[curr.id] = curr.currentTemp;
-      return acc;
-    }, {} as Record<number, number>);
 
-    const currentPhases = modbusData?.currents || { r: 0, y: 0, b: 0 };
-    const initialLogRow: TemperatureLogRow = {
-      timestamp: startTimestamp,
-      elapsedSeconds: 0,
-      temperatures: initialTempMap,
-      currents: currentPhases,
-    };
+    // Save current config as previously entered config
+    try {
+      localStorage.setItem(STORAGE_KEY_PREVIOUS_CONFIG, JSON.stringify(draftConfig));
+      setHasPreviousConfig(true);
+    } catch {}
 
-    dbProvider.createTestSession(draftConfig, testId, durationSeconds).then(() => {
-      dbProvider.logTemperatureRow(testId, 0, startTimestamp, initialTempMap, sensorCount, currentPhases);
-    });
+    // Create session in local database (without logging temperature row until TEST_ON is 1)
+    dbProvider.createTestSession(draftConfig, testId, durationSeconds);
 
     const newSession: TestSession = {
       testId,
@@ -371,7 +505,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       elapsedSeconds: 0,
       remainingSeconds: durationSeconds,
       sensors: initialSensors,
-      temperatureLogs: [initialLogRow],
+      temperatureLogs: [], // Clean initialization: only starts logging when Coil 10 (TEST_ON) is 1
       alarmEvents: [],
     };
 
@@ -380,6 +514,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveAlarms([]);
     setLastResults(null);
     setNextLogCountdown(Math.round(logIntervalMinutes * 60));
+    setIsLoggingActive(false);
 
     temperatureLoggerSingleton.setLogCommittedCallback((logRow) => {
       setActiveSession((prev) => {
@@ -394,10 +529,11 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     temperatureLoggerSingleton.startLogging(
       testId,
       () => sensorService.getSnapshot(),
-      () => activeSession?.elapsedSeconds || 0,
+      () => activeSessionRef.current?.elapsedSeconds || 0,
       logIntervalMinutes,
       sensorCount,
-      () => modbusData?.currents || { r: 0, y: 0, b: 0 }
+      () => modbusDataRef.current?.currents || { r: 0, y: 0, b: 0 },
+      () => Boolean(modbusDataRef.current?.testOn ?? modbusDataRef.current?.coils?.[10])
     );
 
     setActiveTab('dashboard');
@@ -442,9 +578,9 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let failCount = 0;
 
     const pointResults: PointTestResult[] = activeSensors.map((sensor) => {
-      const isSensorFail = sensor.status === 'fail' || sensor.isFailed || sensor.currentTemp >= 30000;
+      const isSensorFail = sensor.status === 'fail' || sensor.isFailed || sensor.currentTemp >= 30000 || sensor.maxTemp >= 30000;
       const initialTemp = sensor.initialTemp;
-      const maxTemp = isSensorFail ? 0 : sensor.maxTemp;
+      const maxTemp = sensor.maxTemp;
       const tempRise = isSensorFail ? 0 : Number((maxTemp - ambientTemp).toFixed(1));
       const pass = !isSensorFail && tempRise <= limitTempRise;
 
@@ -484,12 +620,17 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const endTestSession = (): FinalTestResults => {
+    // 1-Second Pulse to STOP coil (0X: 2) and reset START (0X: 1)
+    pulseCoilToModbus(2, 1000);
+    writeCoilStatusToModbus(1, false);
+
     if (!activeSession) {
       throw new Error('No active test session to end.');
     }
 
     if (timerRef.current) clearInterval(timerRef.current);
     temperatureLoggerSingleton.stopLogging();
+    setIsLoggingActive(false);
 
     const endTimestamp = new Date().toLocaleString();
     const finalRes = calculateFinalResults(activeSession);
@@ -543,6 +684,9 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDraftConfig,
         updateDraftConfig,
         resetWizard,
+        clearDraftConfig,
+        restorePreviousConfig,
+        hasPreviousConfig,
         activeSession,
         startTestSession,
         endTestSession,
@@ -554,12 +698,17 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
         acknowledgeAlarm,
         triggerMockAlarm,
         nextLogCountdown,
+        isLoggingActive,
         modbusStatus,
         modbusData,
         connectModbus,
         disconnectModbus,
         writeModbusCoil,
         writeCoilStatusToModbus,
+        pulseCoilToModbus,
+        readCoilsFromModbus,
+        writeFloatRegisterToModbus,
+        writeSetCurrentToModbus,
         writeTestSpecificationToModbus,
         testHistory,
         selectedHistoryTest,

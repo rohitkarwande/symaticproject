@@ -11,8 +11,23 @@ export interface ModbusAlarms {
   dimMinR: boolean;
   dimMinY: boolean;
   dimMinB: boolean;
+  dimMaxR?: boolean;
+  dimMaxY?: boolean;
+  dimMaxB?: boolean;
   alarmBit: boolean;
   testOn: boolean;
+  start?: boolean;
+  stop?: boolean;
+  autoManual?: boolean;
+}
+
+export interface DimmerStatus {
+  rDimmerZero: boolean;
+  yDimmerZero: boolean;
+  bDimmerZero: boolean;
+  rDimmerMax: boolean;
+  yDimmerMax: boolean;
+  bDimmerMax: boolean;
 }
 
 export interface PhaseValues {
@@ -39,9 +54,12 @@ export interface ModbusDataPayload {
   hysteresis: number;
   ctRange: number;
   
-  // Alarm Bits
+  // Alarm Bits & Coils
   alarms: ModbusAlarms;
   rawRegisters?: Record<number, number>;
+  coils?: Record<number | string, boolean>;
+  dimmers?: DimmerStatus;
+  testOn?: boolean; // 0X: 10 (TEST_ON) — Controls automated logging
   
   // HMI Text String Parameters
   customerName?: string;
@@ -74,18 +92,27 @@ export interface WriteCoilResult {
   writtenCoils: { address: number; state: boolean }[];
 }
 
+export interface ReadCoilsResult {
+  success: boolean;
+  coils: Record<number, boolean>;
+  buffer?: number[];
+}
+
 declare global {
   interface Window {
     electronAPI?: {
       appVersion?: string;
       platform?: string;
+      exportPdf?: (filename: string) => Promise<{ success: boolean; filePath?: string; filename?: string; error?: string }>;
       db?: any;
       modbus?: {
         connect: (config?: Partial<ModbusConfig>) => Promise<boolean>;
         disconnect: () => Promise<boolean>;
         getStatus: () => Promise<ModbusStatus>;
+        readCoils: (startAddress: number, quantity: number) => Promise<ReadCoilsResult>;
         writeCoil: (address: number, state: boolean) => Promise<boolean>;
         writeCoilStatus: (address: number, state: boolean) => Promise<WriteCoilResult>;
+        pulseCoil: (address: number, durationMs?: number) => Promise<{ success: boolean; message: string }>;
         writeRegister: (address: number, value: number) => Promise<boolean>;
         writeMultipleRegisters: (startAddress: number, registers: number[]) => Promise<boolean>;
         writeFloatRegister: (address: number, value: number, wordSwap?: boolean) => Promise<boolean>;

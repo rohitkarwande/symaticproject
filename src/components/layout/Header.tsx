@@ -46,42 +46,45 @@ export const Header: React.FC = () => {
   return (
     <header
       style={{
-        height: '60px',
-        backgroundColor: 'var(--bg-header)',
-        borderBottom: '1px solid var(--border-color)',
+        height: '76px',
+        backgroundColor: '#ffffff',
+        borderBottom: '1px solid #bfdbfe',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 24px',
         userSelect: 'none',
+        boxShadow: '0 2px 6px rgba(37, 99, 235, 0.05)',
       }}
     >
-      {/* Brand & Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+      {/* Brand & Prominently Sized Logo */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
         <img
           src={symaticLogo}
           alt="Symatic Logo"
           style={{
-            height: '46px',
+            height: '64px',
+            maxHeight: '66px',
             width: 'auto',
             objectFit: 'contain',
-            borderRadius: '4px',
+            borderRadius: '6px',
             backgroundColor: '#ffffff',
             padding: '2px',
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.08)',
           }}
         />
         <div>
-          <h1 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
+          <h1 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a', letterSpacing: '-0.3px' }}>
             Temperature Rise Test System
           </h1>
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Industrial Operations & QA Verification
+          <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: 700 }}>
+            Symatic Industrial Automation &amp; QA Verification
           </p>
         </div>
       </div>
 
       {/* System Status Indicators */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
         {/* Modbus Hardware Status Badge */}
         <div
           onClick={() => setShowModbusModal(true)}
@@ -89,21 +92,21 @@ export const Header: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '6px 12px',
-            borderRadius: '4px',
+            padding: '7px 14px',
+            borderRadius: '5px',
             cursor: 'pointer',
             fontSize: '12px',
-            fontWeight: 600,
+            fontWeight: 700,
             backgroundColor: modbusStatus.connected
-              ? 'rgba(16, 185, 129, 0.15)'
-              : 'rgba(239, 68, 68, 0.15)',
-            border: `1px solid ${modbusStatus.connected ? '#10b981' : '#ef4444'}`,
-            color: modbusStatus.connected ? '#34d399' : '#f87171',
+              ? '#ecfdf5'
+              : '#fef2f2',
+            border: `1px solid ${modbusStatus.connected ? '#86efac' : '#fca5a5'}`,
+            color: modbusStatus.connected ? '#15803d' : '#b91c1c',
             transition: 'all 0.2s ease',
           }}
           title="Click to manage Modbus TCP hardware connection"
         >
-          <Network size={15} />
+          <Network size={16} />
           {modbusStatus.connected
             ? `TCP CONNECTED (${modbusStatus.ip})`
             : 'MODBUS OFFLINE'}
@@ -114,17 +117,21 @@ export const Header: React.FC = () => {
           <div
             className="badge badge-normal"
             style={{
-              padding: '6px 14px',
+              padding: '7px 14px',
               fontSize: '13px',
               animation: 'pulse 2s infinite',
+              backgroundColor: '#eff6ff',
+              color: '#1d4ed8',
+              borderColor: '#93c5fd',
+              fontWeight: 800,
             }}
           >
             <Activity size={16} />
             TEST ACTIVE: {activeSession?.testId}
           </div>
         ) : (
-          <div className="badge" style={{ backgroundColor: '#334155', color: '#94a3b8', padding: '6px 12px' }}>
-            <ShieldCheck size={16} />
+          <div className="badge" style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '7px 14px', fontWeight: 700 }}>
+            <ShieldCheck size={16} color="#2563eb" />
             SYSTEM READY
           </div>
         )}
@@ -133,7 +140,7 @@ export const Header: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div
             className={`badge ${activeAlarms.length > 0 ? 'badge-alarm' : 'badge-normal'}`}
-            style={{ padding: '6px 12px' }}
+            style={{ padding: '7px 14px' }}
           >
             <Bell size={15} />
             {activeAlarms.length} ALARM{activeAlarms.length !== 1 ? 'S' : ''}
@@ -147,15 +154,16 @@ export const Header: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            color: '#cbd5e1',
+            color: '#1e3a8a',
             fontSize: '13px',
-            backgroundColor: '#1e293b',
-            padding: '6px 12px',
-            borderRadius: '4px',
-            border: '1px solid #334155',
+            fontWeight: 700,
+            backgroundColor: '#eff6ff',
+            padding: '7px 14px',
+            borderRadius: '5px',
+            border: '1px solid #bfdbfe',
           }}
         >
-          <Clock size={15} color="#94a3b8" />
+          <Clock size={15} color="#2563eb" />
           {currentTime}
         </div>
       </div>
@@ -163,23 +171,23 @@ export const Header: React.FC = () => {
       {/* QUICK MODBUS CONNECTION MODAL */}
       {showModbusModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '520px' }}>
-            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Network size={20} color="#3b82f6" />
+          <div className="modal-content" style={{ maxWidth: '520px', backgroundColor: '#ffffff' }}>
+            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f7ff', borderBottom: '1px solid #bfdbfe' }}>
+              <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0f172a' }}>
+                <Network size={20} color="#2563eb" />
                 Modbus TCP Connection Controls
               </div>
               <button
                 onClick={() => setShowModbusModal(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="modal-body">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', backgroundColor: '#0f172a', padding: '12px', borderRadius: '4px', border: '1px solid #334155' }}>
-                <span style={{ fontSize: '13px', color: '#94a3b8' }}>Current Hardware Status:</span>
+            <div className="modal-body" style={{ color: '#0f172a' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', backgroundColor: '#f8fafc', padding: '12px 16px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>Current Hardware Status:</span>
                 <span
                   style={{
                     fontSize: '12px',
@@ -187,10 +195,10 @@ export const Header: React.FC = () => {
                     padding: '4px 10px',
                     borderRadius: '4px',
                     backgroundColor: modbusStatus.connected
-                      ? 'rgba(16, 185, 129, 0.2)'
-                      : 'rgba(239, 68, 68, 0.2)',
-                    color: modbusStatus.connected ? '#34d399' : '#f87171',
-                    border: `1px solid ${modbusStatus.connected ? '#10b981' : '#ef4444'}`,
+                      ? '#ecfdf5'
+                      : '#fef2f2',
+                    color: modbusStatus.connected ? '#15803d' : '#b91c1c',
+                    border: `1px solid ${modbusStatus.connected ? '#86efac' : '#fca5a5'}`,
                   }}
                 >
                   {modbusStatus.connected
@@ -199,12 +207,12 @@ export const Header: React.FC = () => {
                 </span>
               </div>
 
-              <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '12px' }}>
-                Target IP: <strong>{modbusStatus.ip || '192.168.0.200'}</strong> | Port: <strong>{modbusStatus.port || 502}</strong> | Unit ID: <strong>{modbusStatus.slaveId || 1}</strong>
+              <div style={{ fontSize: '12px', color: '#475569', marginBottom: '12px' }}>
+                Target IP: <strong style={{ color: '#0f172a' }}>{modbusStatus.ip || '192.168.0.200'}</strong> | Port: <strong style={{ color: '#0f172a' }}>{modbusStatus.port || 502}</strong> | Unit ID: <strong style={{ color: '#0f172a' }}>{modbusStatus.slaveId || 1}</strong>
               </div>
 
               {msg && (
-                <div style={{ fontSize: '12px', marginBottom: '14px', color: msg.includes('✓') ? '#34d399' : msg.includes('❌') || msg.includes('⚠️') ? '#f87171' : '#fbbf24' }}>
+                <div style={{ fontSize: '12px', marginBottom: '14px', fontWeight: 600, color: msg.includes('✓') ? '#15803d' : msg.includes('❌') || msg.includes('⚠️') ? '#b91c1c' : '#d97706' }}>
                   {msg}
                 </div>
               )}
@@ -224,14 +232,14 @@ export const Header: React.FC = () => {
                   className="btn btn-secondary"
                   onClick={handleDisconnectHardware}
                   disabled={connecting}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', color: '#f87171', borderColor: '#ef4444' }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', color: '#b91c1c', borderColor: '#fca5a5' }}
                 >
                   Disconnect Modbus Hardware
                 </button>
               </div>
             </div>
 
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
               <button
                 className="btn btn-secondary"
                 onClick={() => {

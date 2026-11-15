@@ -32,15 +32,16 @@ export const Sidebar: React.FC = () => {
     <aside
       style={{
         width: '220px',
-        backgroundColor: 'var(--bg-sidebar)',
-        borderRight: '1px solid var(--border-color)',
+        backgroundColor: '#ffffff',
+        borderRight: '1px solid #bfdbfe',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
         padding: '16px 0',
+        boxShadow: '1px 0 6px rgba(37, 99, 235, 0.04)',
       }}
     >
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '0 8px' }}>
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '0 10px' }}>
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -54,24 +55,25 @@ export const Sidebar: React.FC = () => {
                 alignItems: 'center',
                 gap: '12px',
                 padding: '10px 16px',
-                borderRadius: '4px',
+                borderRadius: '6px',
                 border: 'none',
                 backgroundColor: isActive ? '#2563eb' : 'transparent',
-                color: isActive ? '#ffffff' : '#94a3b8',
-                fontWeight: isActive ? 600 : 500,
+                color: isActive ? '#ffffff' : '#334155',
+                fontWeight: isActive ? 700 : 600,
                 fontSize: '14px',
                 cursor: 'pointer',
                 textAlign: 'left',
-                transition: 'background-color 0.15s ease',
+                transition: 'all 0.15s ease',
+                boxShadow: isActive ? '0 2px 8px rgba(37, 99, 235, 0.3)' : 'none',
               }}
               onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.backgroundColor = '#1e293b';
+                if (!isActive) e.currentTarget.style.backgroundColor = '#eff6ff';
               }}
               onMouseLeave={(e) => {
                 if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              <Icon size={18} color={isActive ? '#ffffff' : '#94a3b8'} />
+              <Icon size={18} color={isActive ? '#ffffff' : '#2563eb'} />
               {item.label}
             </button>
           );
@@ -86,42 +88,77 @@ export const Sidebar: React.FC = () => {
               alignItems: 'center',
               gap: '12px',
               padding: '10px 16px',
-              borderRadius: '4px',
-              border: 'none',
-              backgroundColor: activeTab === 'results' ? '#2563eb' : 'rgba(16, 185, 129, 0.1)',
-              color: activeTab === 'results' ? '#ffffff' : '#10b981',
-              fontWeight: 600,
+              borderRadius: '6px',
+              border: '1px solid #86efac',
+              backgroundColor: activeTab === 'results' ? '#2563eb' : '#ecfdf5',
+              color: activeTab === 'results' ? '#ffffff' : '#15803d',
+              fontWeight: 700,
               fontSize: '14px',
               cursor: 'pointer',
               marginTop: '12px',
             }}
           >
-            <FileCheck size={18} />
+            <FileCheck size={18} color={activeTab === 'results' ? '#ffffff' : '#16a34a'} />
             Latest Results
           </button>
         )}
       </nav>
 
-      {/* Footer Status Panel */}
-      <div style={{ padding: '0 16px' }}>
+      {/* Footer Status Panel & Powered By */}
+      <div style={{ padding: '0 14px', display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '8px' }}>
+        {/* HMI Status Card (Moved Above) */}
         <div
           style={{
-            backgroundColor: '#1e293b',
-            border: '1px solid #334155',
-            borderRadius: '4px',
-            padding: '12px',
+            backgroundColor: '#f8fafc',
+            border: '1px solid #bfdbfe',
+            borderRadius: '6px',
+            padding: '12px 14px',
             fontSize: '12px',
+            boxShadow: '0 1px 3px rgba(37, 99, 235, 0.05)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#cbd5e1', fontWeight: 600 }}>
-            <Activity size={14} color={modbusStatus.connected ? '#10b981' : '#ef4444'} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0f172a', fontWeight: 700 }}>
+            <Activity size={15} color={modbusStatus.connected ? '#16a34a' : '#dc2626'} />
             {modbusStatus.connected ? 'HMI Online' : 'HMI Offline'}
           </div>
           <p style={{ color: '#64748b', fontSize: '11px', marginTop: '4px', margin: 0 }}>
             {modbusStatus.connected
-              ? `Modbus TCP Connected (${modbusStatus.ip})`
-              : 'Modbus Ethernet Disconnected'}
+              ? `Modbus TCP: ${modbusStatus.ip}`
+              : 'Modbus TCP Disconnected'}
           </p>
+        </div>
+
+        {/* Powered by Ajit Electronics (Below HMI Card) */}
+        <div
+          style={{
+            textAlign: 'center',
+            paddingTop: '8px',
+            borderTop: '1px solid #e2e8f0',
+          }}
+        >
+          <span
+            style={{
+              fontSize: '10px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.8px',
+              color: '#64748b',
+              fontWeight: 600,
+              display: 'block',
+            }}
+          >
+            Powered by
+          </span>
+          <div
+            style={{
+              fontSize: '13px',
+              fontWeight: 800,
+              color: '#1e40af',
+              letterSpacing: '0.4px',
+              marginTop: '1px',
+            }}
+          >
+            Ajit Electronics
+          </div>
         </div>
       </div>
     </aside>
