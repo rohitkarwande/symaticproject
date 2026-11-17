@@ -8,7 +8,6 @@ import {
   Zap,
   Filter,
   PlusCircle,
-  Sliders,
   FileText,
 } from 'lucide-react';
 import {
@@ -33,10 +32,8 @@ export const LiveDashboard: React.FC = () => {
     endTestSession,
     setActiveTab,
     nextLogCountdown,
-    isLoggingActive,
     modbusData,
     modbusStatus,
-    writeCoilStatusToModbus,
     pulseCoilToModbus,
   } = useTestContext();
 
@@ -127,26 +124,66 @@ export const LiveDashboard: React.FC = () => {
   }
 
   // 2. Active Test State: Render full live monitoring dashboard
-  const sensorCount = Math.min(48, Math.max(1, Number(activeSession.config.specification.sensorCount) || 48));
-  const logIntervalMinutes = Math.max(0.1, Number(activeSession.config.specification.logIntervalMinutes) || 1);
-  const durationHrs = Number(activeSession.config.specification.testDurationHours) || 1;
-  const ambient = Number(activeSession.config.specification.ambientTemp) || 25;
-  const limitRise = Number(activeSession.config.specification.limitTempRise) || 65;
+  const sensorCount = Math.min(48, Math.max(1, Number(activeSession?.config?.specification?.sensorCount) || 48));
+  const logIntervalMinutes = Math.max(0.1, Number(activeSession?.config?.specification?.logIntervalMinutes) || 1);
+  const durationHrs = Number(activeSession?.config?.specification?.testDurationHours) || 1;
+  const ambient = Number(activeSession?.config?.specification?.ambientTemp) || 25;
+  const limitRise = Number(activeSession?.config?.specification?.limitTempRise) || 65;
 
-  const activeSensors = sensors.filter((s) => s.id <= sensorCount);
+  const activeSensors = (sensors || []).filter((s) => s.id <= sensorCount);
 
   // Live Modbus currents and setpoint
   const currents = modbusData?.currents || { r: 0.0, y: 0.0, b: 0.0 };
   const setpointCurrent =
     modbusData?.setpointCurrent && modbusData.setpointCurrent > 0
       ? modbusData.setpointCurrent
-      : Number(activeSession.config.specification.testCurrent) || 2000;
+      : Number(activeSession?.config?.specification?.testCurrent) || 2000;
 
-  // Hardware Coils Read States (Coils 0X: 1 = START, 0X: 2 = STOP, 0X: 10 = TEST_ON)
+  // Hardware Coils Read States (Coils 0X: 1 = START, 0X: 2 = STOP, 0X: 10 = TEST_ON, 0X: 15 = TIMER_START)
   const isStartCoilActive = Boolean(modbusData?.coils?.[1] ?? modbusData?.coils?.start);
   const isStopCoilActive = Boolean(modbusData?.coils?.[2] ?? modbusData?.coils?.stop);
-  const isTestOnActive = Boolean(modbusData?.testOn ?? modbusData?.coils?.[10]);
-  const isHardwareRunning = hasStartedHardware || isStartCoilActive || isTestOnActive;
+  const isTimerStartActive = Boolean(modbusData?.timerStart ?? modbusData?.coils?.[15]);
+  const isHardwareRunning = hasStartedHardware || isStartCoilActive || isTimerStartActive;
+
+  // Dimmer Zero and Dimmer Max Limit Switch Alarms (Coils 3..8)
+  const isDimmerZeroActive = Boolean(
+    modbusData?.dimmers?.rDimmerZero ||
+    modbusData?.dimmers?.yDimmerZero ||
+    modbusData?.dimmers?.bDimmerZero ||
+    modbusData?.coils?.[3] ||
+    modbusData?.coils?.[4] ||
+    modbusData?.coils?.[5]
+  );
+  const isDimmerMaxActive = Boolean(
+    modbusData?.dimmers?.rDimmerMax ||
+    modbusData?.dimmers?.yDimmerMax ||
+    modbusData?.dimmers?.bDimmerMax ||
+    modbusData?.coils?.[6] ||
+    modbusData?.coils?.[7] ||
+    modbusData?.coils?.[8]
+  );
+  const isDimmerAlarmActive = isDimmerZeroActive || isDimmerMaxActive;
+
+  // Filter out any over temperature limit alarm per user specification
+  const validActiveAlarms = activeAlarms.filter(
+    (a) => a.alarmId !== 1 && a.alarmCode !== 'ALM-01' && a.alarmName !== 'Over Temperature Limit'
+  );
+
+  // Alarm presence check (Any active alarm disables START button)
+  const hasTriggeredAlarm =
+    validActiveAlarms.length > 0 ||
+    Boolean(modbusData?.coils?.[12]) ||
+    Boolean(modbusData?.coils?.[13]) ||
+    Boolean(modbusData?.impedanceAlarm) ||
+    Boolean(modbusData?.noCurrentAlarm);
+
+  // START button disabled condition
+  const isStartDisabled = isHardwareRunning || isStartingHw || isDimmerAlarmActive || hasTriggeredAlarm;
+
+  // Actual Hardware Timer registers: 4X: 58 (MIN) & 4X: 59 (HRS), 4X: 57 (SET_TIMER)
+  const actTimerHrs = modbusData?.actTimerHrs ?? 0;
+  const actTimerMin = modbusData?.actTimerMin ?? 0;
+  const setTimerVal = modbusData?.setTimer && modbusData.setTimer > 0 ? modbusData.setTimer : durationHrs;
 
   // 6 Industrial Dimmer Cards (Wired to Coils 0X: 3..8 — Blinks when value is 1)
   const DIMMER_CARDS = [
@@ -271,18 +308,20 @@ export const LiveDashboard: React.FC = () => {
     return true;
   });
 
-  const chartData = activeSession.temperatureLogs.map((log) => {
+  const chartData = (activeSession.temperatureLogs || []).map((log) => {
     const row: any = {
       time: log.timestamp,
     };
-    Object.entries(log.temperatures).forEach(([ptId, temp]) => {
-      const idNum = Number(ptId);
-      if (idNum <= sensorCount) {
-        row[`TEMP_${idNum}`] = temp;
-      }
-    });
+    if (log.temperatures) {
+      Object.entries(log.temperatures).forEach(([ptId, temp]) => {
+        const idNum = Number(ptId);
+        if (idNum <= sensorCount) {
+          row[`TEMP_${idNum}`] = temp;
+        }
+      });
+    }
     return row;
-  }) || [];
+  });
 
   return (
     <div style={{ padding: '20px', height: '100%', overflowY: 'auto', backgroundColor: '#f0f7ff' }}>
@@ -309,41 +348,40 @@ export const LiveDashboard: React.FC = () => {
             </span>
           </div>
           <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-            {activeSession.config.customer.customerName}
+            {activeSession?.config?.customer?.customerName || 'Customer'}
           </h2>
           <p style={{ fontSize: '12px', color: '#475569', margin: '2px 0 0 0' }}>
-            {activeSession.config.equipment.equipmentName} ({activeSession.config.equipment.model})
+            {activeSession?.config?.equipment?.equipmentName || 'Equipment'} ({activeSession?.config?.equipment?.model || 'Model'})
           </p>
         </div>
 
-        {/* Timers & TWO ACTION BUTTONS (START & STOP WIRED TO REAL REGISTER ADDRESSES) */}
+        {/* Timers & THREE ACTION BUTTONS: START, STOP, NEW TEST */}
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <div style={{ backgroundColor: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Configured</div>
-            <div className="font-mono" style={{ fontSize: '15px', fontWeight: 800, color: '#0f172a' }}>{durationHrs}h 00m</div>
+            <div style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Config Duration</div>
+            <div className="font-mono" style={{ fontSize: '15px', fontWeight: 800, color: '#0f172a' }}>{setTimerVal}h 00m</div>
           </div>
 
-          <div style={{ backgroundColor: '#eff6ff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #bfdbfe', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', color: '#2563eb', textTransform: 'uppercase', fontWeight: 700 }}>Elapsed Time</div>
-            <div className="font-mono" style={{ fontSize: '15px', fontWeight: 800, color: '#1d4ed8' }}>{formatTime(activeSession.elapsedSeconds)}</div>
-          </div>
-
-          <div style={{ backgroundColor: '#fffbeb', padding: '8px 12px', borderRadius: '6px', border: '1px solid #fde68a', textAlign: 'center' }}>
-            <div style={{ fontSize: '10px', color: '#b45309', textTransform: 'uppercase', fontWeight: 700 }}>Remaining</div>
-            <div className="font-mono" style={{ fontSize: '15px', fontWeight: 800, color: '#b45309' }}>{formatTime(activeSession.remainingSeconds)}</div>
+          <div style={{ backgroundColor: '#eff6ff', padding: '8px 14px', borderRadius: '6px', border: '1px solid #93c5fd', textAlign: 'center' }}>
+            <div style={{ fontSize: '10px', color: '#1d4ed8', textTransform: 'uppercase', fontWeight: 800 }}>Actual Timer</div>
+            <div className="font-mono" style={{ fontSize: '15px', fontWeight: 800, color: '#1d4ed8' }}>
+              {actTimerHrs}h {actTimerMin}m
+            </div>
           </div>
 
           <div style={{ backgroundColor: '#ecfdf5', padding: '8px 12px', borderRadius: '6px', border: '1px solid #a7f3d0', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#15803d', textTransform: 'uppercase', fontWeight: 700 }}>Next Report Log</div>
-            <div className="font-mono" style={{ fontSize: '15px', fontWeight: 800, color: '#15803d' }}>{formatTime(nextLogCountdown)}</div>
+            <div className="font-mono" style={{ fontSize: '15px', fontWeight: 800, color: '#15803d' }}>
+              {isTimerStartActive ? formatTime(nextLogCountdown) : 'Waiting'}
+            </div>
           </div>
 
-          {/* TWO ACTION BUTTONS IN DASHBOARD WIRED TO REGISTER ADDRESSES */}
-          {/* 1. START TEST BUTTON (WIRED TO COIL 0X: 1 - FADES OUT ONCE CLICKED) */}
+          {/* ACTION BUTTONS: START, STOP */}
+          {/* 1. START TEST BUTTON */}
           <button
             className="btn btn-primary"
             onClick={handleStartHardware}
-            disabled={isHardwareRunning || isStartingHw}
+            disabled={isStartDisabled}
             style={{
               padding: '10px 18px',
               fontSize: '13px',
@@ -351,22 +389,26 @@ export const LiveDashboard: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              backgroundColor: isHardwareRunning ? '#14532d' : '#16a34a',
-              borderColor: isHardwareRunning ? '#166534' : '#22c55e',
-              opacity: isHardwareRunning ? 0.38 : 1,
-              cursor: isHardwareRunning ? 'not-allowed' : 'pointer',
-              filter: isHardwareRunning ? 'grayscale(50%)' : 'none',
-              boxShadow: isHardwareRunning ? 'none' : '0 2px 8px rgba(34, 197, 94, 0.35)',
+              backgroundColor: isStartDisabled ? '#14532d' : '#16a34a',
+              borderColor: isStartDisabled ? '#166534' : '#22c55e',
+              opacity: isStartDisabled ? 0.38 : 1,
+              cursor: isStartDisabled ? 'not-allowed' : 'pointer',
+              filter: isStartDisabled ? 'grayscale(50%)' : 'none',
+              boxShadow: isStartDisabled ? 'none' : '0 2px 8px rgba(34, 197, 94, 0.35)',
               transition: 'all 0.25s ease',
             }}
             title={
               isHardwareRunning
-                ? 'Test is currently running on hardware (Coil 0X: 1 active). Use STOP button to end test.'
-                : 'Assert hardware START coil (0X: 1 = ON, 0X: 2 = OFF)'
+                ? 'Test is currently running on hardware'
+                : isDimmerAlarmActive
+                ? 'START disabled: Dimmer Zero / Dimmer Max limit switch active'
+                : hasTriggeredAlarm
+                ? 'START disabled: Active alarm present. Clear alarm before starting.'
+                : 'Start test on hardware'
             }
           >
             <Play size={16} />
-            <span>START (0X: 1)</span>
+            <span>START</span>
             <span
               style={{
                 fontSize: '10px',
@@ -382,7 +424,7 @@ export const LiveDashboard: React.FC = () => {
             </span>
           </button>
 
-          {/* 2. STOP TEST BUTTON (WIRED TO COIL 0X: 2 - ACTIVE WHEN RUNNING) */}
+          {/* 2. STOP TEST BUTTON */}
           <button
             className="btn btn-danger"
             onClick={() => setShowEndConfirmModal(true)}
@@ -402,10 +444,10 @@ export const LiveDashboard: React.FC = () => {
               animation: isHardwareRunning ? 'pulse 2s infinite' : 'none',
               transition: 'all 0.25s ease',
             }}
-            title="Conclude test and assert hardware STOP coil (0X: 2 = ON, 0X: 1 = OFF)"
+            title="Conclude test and stop hardware"
           >
             <Square size={16} />
-            <span>STOP (0X: 2)</span>
+            <span>STOP</span>
             <span
               style={{
                 fontSize: '10px',
@@ -423,26 +465,25 @@ export const LiveDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* MODBUS TCP PHASE ELECTRICAL CURRENTS (4X 49, 4X 51, 4X 53, 4X 55 - READ & WRITE) */}
+      {/* PHASE ELECTRICAL CURRENTS & SETPOINT */}
       <div className="ind-card" style={{ marginBottom: '16px', padding: '16px 20px', backgroundColor: '#ffffff', border: '1px solid #bfdbfe' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Zap size={18} color="#2563eb" />
             <h3 style={{ fontSize: '15px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-              Phase Electrical Currents &amp; Setpoint (Holding Registers 4X: 49..55, Read &amp; Write)
+              Phase Electrical Currents &amp; Setpoint
             </h3>
           </div>
           <span style={{ fontSize: '12px', fontWeight: 700, color: modbusStatus.connected ? '#15803d' : '#b91c1c' }}>
-            {modbusStatus.connected ? `Modbus Connected: ${modbusStatus.ip}:${modbusStatus.port}` : 'Modbus TCP Offline'}
+            {modbusStatus.connected ? 'Hardware Online' : 'Hardware Disconnected'}
           </span>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
-          {/* Current R Phase_OP_MTR (4X 49, Length 2) */}
+          {/* Current R Phase */}
           <div style={{ backgroundColor: '#fef2f2', padding: '12px 14px', borderRadius: '6px', border: '1px solid #fca5a5' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <div style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 800 }}>R-PHASE CURRENT</div>
-              <span style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace' }}>4X: 49 (Len 2)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <div className="font-mono" style={{ fontSize: '24px', fontWeight: 800, color: currents.r > 30000 ? '#dc2626' : '#0f172a' }}>
@@ -454,14 +495,13 @@ export const LiveDashboard: React.FC = () => {
                 </span>
               )}
             </div>
-            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Current R Phase_OP_MTR [R/W]</div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>R Phase Operating Current</div>
           </div>
 
-          {/* Current Y Phase_OP_MTR (4X 51, Length 2) */}
+          {/* Current Y Phase */}
           <div style={{ backgroundColor: '#fffbeb', padding: '12px 14px', borderRadius: '6px', border: '1px solid #fde68a' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <div style={{ fontSize: '11px', color: '#b45309', fontWeight: 800 }}>Y-PHASE CURRENT</div>
-              <span style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace' }}>4X: 51 (Len 2)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <div className="font-mono" style={{ fontSize: '24px', fontWeight: 800, color: currents.y > 30000 ? '#dc2626' : '#0f172a' }}>
@@ -473,14 +513,13 @@ export const LiveDashboard: React.FC = () => {
                 </span>
               )}
             </div>
-            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Current Y Phase_OP_MTR [R/W]</div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Y Phase Operating Current</div>
           </div>
 
-          {/* Current B Phase_OP_MTR (4X 53, Length 2) */}
+          {/* Current B Phase */}
           <div style={{ backgroundColor: '#eff6ff', padding: '12px 14px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 800 }}>B-PHASE CURRENT</div>
-              <span style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace' }}>4X: 53 (Len 2)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <div className="font-mono" style={{ fontSize: '24px', fontWeight: 800, color: currents.b > 30000 ? '#dc2626' : '#0f172a' }}>
@@ -492,21 +531,72 @@ export const LiveDashboard: React.FC = () => {
                 </span>
               )}
             </div>
-            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Current B Phase_OP_MTR [R/W]</div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>B Phase Operating Current</div>
           </div>
 
-          {/* SET_CURRENT (4X 55, Length 2) */}
+          {/* SET_CURRENT */}
           <div style={{ backgroundColor: '#ecfdf5', padding: '12px 14px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <div style={{ fontSize: '11px', color: '#15803d', fontWeight: 800 }}>SET CURRENT</div>
-              <span style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace' }}>4X: 55 (Len 2)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <div className="font-mono" style={{ fontSize: '24px', fontWeight: 800, color: '#15803d' }}>
                 {setpointCurrent.toFixed(1)} A
               </div>
             </div>
-            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>SET_CURRENT Value [R/W]</div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Target Current Setpoint</div>
+          </div>
+        </div>
+
+        {/* Row 2: Timer Status Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginTop: '12px' }}>
+          {/* SET TIMER */}
+          <div style={{ backgroundColor: '#f8fafc', padding: '12px 14px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <div style={{ fontSize: '11px', color: '#334155', fontWeight: 800 }}>SET TIMER</div>
+            </div>
+            <div className="font-mono" style={{ fontSize: '24px', fontWeight: 800, color: '#0f172a' }}>
+              {setTimerVal} <span style={{ fontSize: '14px', fontWeight: 600, color: '#64748b' }}>Hrs</span>
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Programmed Test Duration</div>
+          </div>
+
+          {/* ACT TIMER (HOURS) */}
+          <div style={{ backgroundColor: '#eff6ff', padding: '12px 14px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 800 }}>ACT TIMER (HOURS)</div>
+            </div>
+            <div className="font-mono" style={{ fontSize: '24px', fontWeight: 800, color: '#1d4ed8' }}>
+              {actTimerHrs} <span style={{ fontSize: '14px', fontWeight: 600, color: '#64748b' }}>Hrs</span>
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Actual Elapsed Hours</div>
+          </div>
+
+          {/* ACT TIMER (MINUTES) */}
+          <div style={{ backgroundColor: '#eff6ff', padding: '12px 14px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 800 }}>ACT TIMER (MINUTES)</div>
+            </div>
+            <div className="font-mono" style={{ fontSize: '24px', fontWeight: 800, color: '#1d4ed8' }}>
+              {actTimerMin} <span style={{ fontSize: '14px', fontWeight: 600, color: '#64748b' }}>Min</span>
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Actual Elapsed Minutes</div>
+          </div>
+
+          {/* TIMER STATUS */}
+          <div style={{ backgroundColor: isTimerStartActive ? '#ecfdf5' : '#f8fafc', padding: '12px 14px', borderRadius: '6px', border: `1px solid ${isTimerStartActive ? '#a7f3d0' : '#cbd5e1'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <div style={{ fontSize: '11px', color: isTimerStartActive ? '#15803d' : '#64748b', fontWeight: 800 }}>TIMER STATUS</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: isTimerStartActive ? '#16a34a' : '#94a3b8' }} />
+              <div className="font-mono" style={{ fontSize: '20px', fontWeight: 800, color: isTimerStartActive ? '#15803d' : '#64748b' }}>
+                {isTimerStartActive ? 'RUNNING' : 'WAITING'}
+              </div>
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+              {isTimerStartActive ? 'Data Logging Active' : 'Data Logging Paused'}
+            </div>
           </div>
         </div>
       </div>
@@ -562,7 +652,7 @@ export const LiveDashboard: React.FC = () => {
       </div>
 
       {/* ACTIVE ALARMS TICKER BAR */}
-      {activeAlarms.length > 0 && (
+      {validActiveAlarms.length > 0 && (
         <div
           style={{
             backgroundColor: '#fef2f2',
@@ -577,8 +667,8 @@ export const LiveDashboard: React.FC = () => {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#b91c1c' }}>
             <AlertTriangle size={18} color="#dc2626" />
-            <span style={{ fontWeight: 800 }}>ACTIVE ALARM ({activeAlarms.length}):</span>
-            <span style={{ fontWeight: 600 }}>{activeAlarms[0]?.alarmName} — {activeAlarms[0]?.description}</span>
+            <span style={{ fontWeight: 800 }}>ACTIVE ALARM ({validActiveAlarms.length}):</span>
+            <span style={{ fontWeight: 600 }}>{validActiveAlarms[0]?.alarmName} — {validActiveAlarms[0]?.description}</span>
           </div>
           <button className="btn btn-secondary" onClick={() => setActiveTab('alarms')} style={{ fontSize: '12px', padding: '4px 10px', backgroundColor: '#ffffff', borderColor: '#fca5a5', color: '#b91c1c' }}>
             View Alarms Log
@@ -753,14 +843,6 @@ export const LiveDashboard: React.FC = () => {
             <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
               Temperature Rise Trend Curves (°C)
             </h3>
-            {activeSensors.length > 0 && (() => {
-              const maxSens = activeSensors.reduce((prev, curr) => (curr.currentTemp > prev.currentTemp ? curr : prev), activeSensors[0]);
-              return (
-                <span className="badge badge-warning" style={{ fontSize: '12px', padding: '3px 10px', backgroundColor: '#fffbeb', color: '#b45309', border: '1px solid #fde68a' }}>
-                  PEAK HOTSPOT: {maxSens.label} ({maxSens.currentTemp.toFixed(1)}°C)
-                </span>
-              );
-            })()}
           </div>
           <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
             Acceptance Threshold: {(ambient + limitRise).toFixed(1)}°C | Sampling: 1 Log / {logIntervalMinutes} Min | Hardware Poll: 500ms
@@ -824,9 +906,9 @@ export const LiveDashboard: React.FC = () => {
                 fontWeight: 700,
                 padding: '3px 8px',
                 borderRadius: '4px',
-                backgroundColor: isTestOnActive ? '#dcfce7' : '#f1f5f9',
-                color: isTestOnActive ? '#15803d' : '#64748b',
-                border: `1px solid ${isTestOnActive ? '#86efac' : '#cbd5e1'}`,
+                backgroundColor: isTimerStartActive ? '#dcfce7' : '#f1f5f9',
+                color: isTimerStartActive ? '#15803d' : '#64748b',
+                border: `1px solid ${isTimerStartActive ? '#86efac' : '#cbd5e1'}`,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '5px',
@@ -837,16 +919,16 @@ export const LiveDashboard: React.FC = () => {
                   width: '7px',
                   height: '7px',
                   borderRadius: '50%',
-                  backgroundColor: isTestOnActive ? '#16a34a' : '#94a3b8',
+                  backgroundColor: isTimerStartActive ? '#16a34a' : '#94a3b8',
                 }}
               />
-              {isTestOnActive ? 'TEST_ON (0X: 10) = 1 — LOGGING' : 'TEST_ON (0X: 10) = 0 — PAUSED'}
+              {isTimerStartActive ? 'TIMER ACTIVE — LOGGING' : 'TIMER INACTIVE — LOGGING PAUSED'}
             </span>
           </div>
           <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
             Interval: 1 Log every {logIntervalMinutes} min | Next log:{' '}
-            <strong className="font-mono" style={{ color: isTestOnActive ? '#15803d' : '#64748b' }}>
-              {isTestOnActive ? formatTime(nextLogCountdown) : 'Waiting for TEST_ON'}
+            <strong className="font-mono" style={{ color: isTimerStartActive ? '#15803d' : '#64748b' }}>
+              {isTimerStartActive ? formatTime(nextLogCountdown) : 'Waiting for Timer Start'}
             </strong>
           </span>
         </div>
@@ -886,7 +968,7 @@ export const LiveDashboard: React.FC = () => {
                       <td className="font-mono" style={{ padding: '6px 12px', textAlign: 'right', color: '#b45309', fontWeight: 700, border: '1px solid #bfdbfe' }}>{yVal}</td>
                       <td className="font-mono" style={{ padding: '6px 12px', textAlign: 'right', color: '#1d4ed8', fontWeight: 700, border: '1px solid #bfdbfe' }}>{bVal}</td>
                       {Array.from({ length: sensorCount }, (_, i) => {
-                        const temp = log.temperatures[i + 1];
+                        const temp = log.temperatures ? log.temperatures[i + 1] : undefined;
                         const isFail = temp !== undefined && temp !== null && temp >= 30000;
                         const tempDisplay = isFail ? 'FAIL' : (temp !== undefined && temp !== null ? Number(temp).toFixed(1) : '-');
                         return (
@@ -928,16 +1010,16 @@ export const LiveDashboard: React.FC = () => {
           </div>
         ) : (
           <div style={{ padding: '28px 20px', textAlign: 'center', color: '#64748b', fontSize: '13px', backgroundColor: '#f8fafc', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
-            <Activity size={24} color={isTestOnActive ? '#16a34a' : '#94a3b8'} style={{ marginBottom: '6px' }} />
+            <Activity size={24} color={isTimerStartActive ? '#16a34a' : '#94a3b8'} style={{ marginBottom: '6px' }} />
             <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '2px' }}>
-              {isTestOnActive
+              {isTimerStartActive
                 ? `Recording first periodic log in ${formatTime(nextLogCountdown)}...`
-                : 'Awaiting Hardware TEST_ON Signal (Coil 0X: 10 = 1)'}
+                : 'Awaiting Hardware Timer Start Signal'}
             </div>
             <div>
-              {isTestOnActive
+              {isTimerStartActive
                 ? `Data logging is currently running every ${logIntervalMinutes} minute(s).`
-                : 'Data logging starts automatically when the PLC asserts Coil 0X: 10 (TEST_ON).'}
+                : 'Data logging starts automatically when the hardware timer starts.'}
             </div>
           </div>
         )}
@@ -978,7 +1060,7 @@ export const LiveDashboard: React.FC = () => {
               Are you sure you want to conclude the temperature rise test session?
               <br />
               <strong style={{ color: '#0f172a' }}>
-                This will assert STOP coil (0X: 2) on the hardware, finalize logging, and generate the final QA compliance report.
+                This will stop hardware monitoring, finalize logging, and generate the final QA compliance report.
               </strong>
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -995,7 +1077,7 @@ export const LiveDashboard: React.FC = () => {
                 disabled={isStopping}
                 style={{ padding: '9px 22px', fontWeight: 700 }}
               >
-                {isStopping ? 'Stopping Hardware...' : 'Yes, End Test & Write 0X: 2'}
+                {isStopping ? 'Stopping Hardware...' : 'Yes, End Test'}
               </button>
             </div>
           </div>

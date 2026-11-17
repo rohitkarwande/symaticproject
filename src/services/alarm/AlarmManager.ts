@@ -2,15 +2,6 @@ import type { AlarmDefinition, AlarmEvent, SensorPoint } from '../../types/test'
 
 export const INITIAL_12_ALARMS: AlarmDefinition[] = [
   {
-    id: 1,
-    code: 'ALM-01',
-    name: 'Over Temperature Limit',
-    description: 'One or more sensor points exceeded maximum allowable temperature threshold.',
-    severity: 'critical',
-    enabled: true,
-    active: false,
-  },
-  {
     id: 2,
     code: 'ALM-02',
     name: 'Rapid Temperature Rise Rate',
@@ -117,6 +108,14 @@ export class AlarmManager {
   private eventHistory: AlarmEvent[] = [];
   private onAlarmTriggeredCallback?: (event: AlarmEvent) => void;
 
+  public resetForNewTest(testId: string): void {
+    this.activeEvents = [];
+    this.eventHistory = [];
+    this.alarmDefinitions.forEach((def) => {
+      def.active = false;
+    });
+  }
+
   public setAlarmTriggerCallback(cb: (event: AlarmEvent) => void) {
     this.onAlarmTriggeredCallback = cb;
   }
@@ -138,35 +137,6 @@ export class AlarmManager {
     limitTempRise: number
   ): AlarmEvent[] {
     const newlyTriggered: AlarmEvent[] = [];
-
-    // Check Alarm 1: Over Temperature Limit
-    const overLimitPoint = sensors.find(
-      (s) => s.currentTemp - ambientTemp > limitTempRise || s.currentTemp > 90
-    );
-    const alm1Def = this.alarmDefinitions.find((a) => a.id === 1);
-
-    if (alm1Def && alm1Def.enabled) {
-      if (overLimitPoint && !alm1Def.active) {
-        alm1Def.active = true;
-        const event: AlarmEvent = {
-          id: `EVT-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          testId,
-          alarmId: 1,
-          alarmCode: alm1Def.code,
-          alarmName: alm1Def.name,
-          severity: alm1Def.severity,
-          description: `${overLimitPoint.label} exceeded temperature rise limit (${overLimitPoint.currentTemp}°C vs Limit + Ambient ${(ambientTemp + limitTempRise).toFixed(1)}°C).`,
-          timestamp: new Date().toLocaleTimeString(),
-          acknowledged: false,
-        };
-        this.activeEvents.push(event);
-        this.eventHistory.push(event);
-        newlyTriggered.push(event);
-        if (this.onAlarmTriggeredCallback) this.onAlarmTriggeredCallback(event);
-      } else if (!overLimitPoint && alm1Def.active) {
-        alm1Def.active = false;
-      }
-    }
 
     // Check Alarm 3: Ambient High
     const alm3Def = this.alarmDefinitions.find((a) => a.id === 3);
@@ -228,12 +198,23 @@ export class AlarmManager {
     }
   }
 
+  public recordAlarmEvent(event: AlarmEvent): void {
+    if (event.alarmId === 1 || event.alarmCode === 'ALM-01' || event.alarmName === 'Over Temperature Limit') {
+      return;
+    }
+    this.eventHistory.push(event);
+  }
+
   public getActiveEvents(): AlarmEvent[] {
-    return [...this.activeEvents];
+    return this.activeEvents.filter(
+      (e) => e.alarmId !== 1 && e.alarmCode !== 'ALM-01' && e.alarmName !== 'Over Temperature Limit'
+    );
   }
 
   public getEventHistory(): AlarmEvent[] {
-    return [...this.eventHistory];
+    return this.eventHistory.filter(
+      (e) => e.alarmId !== 1 && e.alarmCode !== 'ALM-01' && e.alarmName !== 'Over Temperature Limit'
+    );
   }
 }
 

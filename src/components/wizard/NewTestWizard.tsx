@@ -26,8 +26,10 @@ export const NewTestWizard: React.FC = () => {
     updateDraftConfig,
     setActiveTab,
     writeSetCurrentToModbus,
+    writeSetTimerToModbus,
     writeTestSpecificationToModbus,
     modbusStatus,
+    modbusData,
     connectModbus,
     clearDraftConfig,
     restorePreviousConfig,
@@ -36,12 +38,12 @@ export const NewTestWizard: React.FC = () => {
 
   const [currentSyncStatus, setCurrentSyncStatus] = useState<string>('');
   const [isWritingCurrent, setIsWritingCurrent] = useState<boolean>(false);
+  const [durationSyncStatus, setDurationSyncStatus] = useState<string>('');
+  const [isWritingDuration, setIsWritingDuration] = useState<boolean>(false);
   const [showDisconnectModal, setShowDisconnectModal] = useState<boolean>(!modbusStatus.connected);
 
   useEffect(() => {
-    if (modbusStatus.connected) {
-      setShowDisconnectModal(false);
-    }
+    setShowDisconnectModal(!modbusStatus.connected);
   }, [modbusStatus.connected]);
 
   // Manual Trigger: Write testCurrent to Register 4X: 55 ONLY when user clicks Enter Arrow or presses Enter
@@ -54,11 +56,11 @@ export const NewTestWizard: React.FC = () => {
     }
 
     setIsWritingCurrent(true);
-    setCurrentSyncStatus('Writing to 4X: 55...');
+    setCurrentSyncStatus('Writing Set Current to PLC...');
     try {
       const res = await writeSetCurrentToModbus(num);
       if (res.success) {
-        setCurrentSyncStatus(`✓ Written ${num.toFixed(1)} A to Register 4X: 55`);
+        setCurrentSyncStatus(`✓ Set Current updated: ${num.toFixed(1)} A`);
       } else {
         setCurrentSyncStatus('❌ Hardware offline / Write failed');
       }
@@ -66,6 +68,31 @@ export const NewTestWizard: React.FC = () => {
       setCurrentSyncStatus('❌ Write error');
     } finally {
       setIsWritingCurrent(false);
+    }
+  };
+
+  // Manual Trigger: Write testDurationHours (SET_TIMER) ONLY when user clicks Enter Arrow or presses Enter
+  const handleWriteDuration = async () => {
+    const val = draftConfig.specification.testDurationHours;
+    const num = Number(val);
+    if (isNaN(num) || num <= 0) {
+      setDurationSyncStatus('⚠️ Please enter a valid test duration (> 0 Hours)');
+      return;
+    }
+
+    setIsWritingDuration(true);
+    setDurationSyncStatus('Writing Set Timer to PLC...');
+    try {
+      const res = await writeSetTimerToModbus(num);
+      if (res.success) {
+        setDurationSyncStatus(`✓ Set Timer updated: ${num} Hours`);
+      } else {
+        setDurationSyncStatus('❌ Hardware offline / Write failed');
+      }
+    } catch {
+      setDurationSyncStatus('❌ Write error');
+    } finally {
+      setIsWritingDuration(false);
     }
   };
 
@@ -237,10 +264,10 @@ export const NewTestWizard: React.FC = () => {
               </div>
               <div>
                 <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 6px 0', color: '#b45309' }}>
-                  Hardware Disconnected (Modbus TCP Offline)
+                  Hardware Controller Offline
                 </h3>
                 <p style={{ fontSize: '13px', color: '#475569', margin: 0, lineHeight: '1.5' }}>
-                  The application is currently <strong>not connected</strong> to the PLC / HMI hardware via Modbus TCP. A live TCP connection is required to transmit test parameters, pulse start coils, and read real-time RTD temperature channels.
+                  The application is currently <strong>not connected</strong> to the hardware controller. A live Ethernet connection is required to transmit test parameters, pulse start coils, and read real-time RTD temperature channels.
                 </p>
               </div>
             </div>
@@ -256,23 +283,20 @@ export const NewTestWizard: React.FC = () => {
                 color: '#1e40af',
               }}
             >
-              <div style={{ fontWeight: 700, marginBottom: '4px' }}>Recommended Steps:</div>
+              <div style={{ fontWeight: 700, marginBottom: '4px' }}>Hardware Ethernet Status:</div>
               <div>
-                1. Navigate to <strong>System Settings</strong> to check your PLC IP Address & Port (configured: <code>{modbusStatus.ip || '192.168.0.200'}:{modbusStatus.port || 502}</code>).
+                Target Controller: <strong>Industrial Hardware Controller</strong> (Port 502, Unit ID: 1)
               </div>
-              <div style={{ marginTop: '2px' }}>
-                2. Click <strong>CONNECT HARDWARE</strong> to establish communication before proceeding with live testing.
+              <div style={{ marginTop: '4px' }}>
+                Please connect the Ethernet cable to the controller. The application will automatically detect and establish the connection.
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => {
-                  setShowDisconnectModal(false);
-                  setActiveTab('settings');
-                }}
+                onClick={() => connectModbus()}
                 style={{
                   padding: '10px 22px',
                   fontSize: '13px',
@@ -285,7 +309,7 @@ export const NewTestWizard: React.FC = () => {
                   borderRadius: '6px',
                 }}
               >
-                <Settings size={16} /> Go to System Settings
+                <RotateCcw size={16} /> Retry Connection
               </button>
             </div>
           </div>
@@ -504,14 +528,12 @@ export const NewTestWizard: React.FC = () => {
               </label>
               <input
                 type="text"
-                className={`form-input ${equipmentErrors.equipmentName ? 'invalid' : ''}`}
-                value={draftConfig.equipment.equipmentName}
-                onChange={(e) => updateDraftConfig('equipment', { equipmentName: e.target.value })}
-                placeholder="e.g. 33kV Vacuum Circuit Breaker Panel"
+                className="form-input"
+                readOnly
+                disabled
+                style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#0f172a', fontWeight: 700 }}
+                value="Temperature Rise Tester"
               />
-              {equipmentErrors.equipmentName && (
-                <div className="form-error-msg">{equipmentErrors.equipmentName}</div>
-              )}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
@@ -587,8 +609,42 @@ export const NewTestWizard: React.FC = () => {
         {wizardStep === 3 && (
           <div>
             <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '16px', color: '#3b82f6' }}>
-              Test Specification & Operating Parameters
+              Test Specification &amp; Operating Parameters
             </h3>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div className="form-group">
+                <label className="form-label">
+                  Rated Voltage (V)
+                </label>
+                <input
+                  type="number"
+                  className={`form-input ${specErrors.ratedVoltage ? 'invalid' : ''}`}
+                  value={draftConfig.specification.ratedVoltage ?? ''}
+                  onChange={(e) => updateDraftConfig('specification', { ratedVoltage: e.target.value })}
+                  placeholder="e.g. 415"
+                />
+                {specErrors.ratedVoltage && (
+                  <div className="form-error-msg">{specErrors.ratedVoltage}</div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Rated Current (A)
+                </label>
+                <input
+                  type="number"
+                  className={`form-input ${specErrors.ratedCurrent ? 'invalid' : ''}`}
+                  value={draftConfig.specification.ratedCurrent ?? ''}
+                  onChange={(e) => updateDraftConfig('specification', { ratedCurrent: e.target.value })}
+                  placeholder="e.g. 2500"
+                />
+                {specErrors.ratedCurrent && (
+                  <div className="form-error-msg">{specErrors.ratedCurrent}</div>
+                )}
+              </div>
+            </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div className="form-group">
@@ -608,7 +664,7 @@ export const NewTestWizard: React.FC = () => {
                       fontWeight: 600,
                     }}
                   >
-                    4X: 55 (SET_CURRENT) [R/W]
+                    SET CURRENT [R/W]
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
@@ -631,7 +687,7 @@ export const NewTestWizard: React.FC = () => {
                     className="btn btn-primary"
                     onClick={handleWriteCurrent}
                     disabled={isWritingCurrent}
-                    title="Click or press Enter to write value to Register 4X: 55"
+                    title="Click or press Enter to write value to hardware"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -654,7 +710,7 @@ export const NewTestWizard: React.FC = () => {
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
                   <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    Click <strong>Enter ↵</strong> or press Enter key to write value to Holding Register 4X: 55.
+                    Click <strong>Enter ↵</strong> or press Enter key to write value to hardware.
                   </span>
                   {currentSyncStatus && (
                     <span
@@ -671,25 +727,85 @@ export const NewTestWizard: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">
-                  Test Duration (Hours: 1 - 24) <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="24"
-                  step="0.5"
-                  className={`form-input ${specErrors.testDurationHours ? 'invalid' : ''}`}
-                  value={draftConfig.specification.testDurationHours}
-                  onChange={(e) => updateDraftConfig('specification', { testDurationHours: e.target.value })}
-                  placeholder="e.g. 2"
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label className="form-label" style={{ margin: 0 }}>
+                    Test Duration (Hours) <span className="required">*</span>
+                  </label>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontFamily: 'monospace',
+                      color: '#34d399',
+                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                      border: '1px solid rgba(16, 185, 129, 0.35)',
+                      padding: '2px 7px',
+                      borderRadius: '3px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    SET TIMER [R/W]
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    step="1"
+                    className={`form-input ${specErrors.testDurationHours ? 'invalid' : ''}`}
+                    style={{ flex: 1 }}
+                    value={draftConfig.specification.testDurationHours}
+                    onChange={(e) => updateDraftConfig('specification', { testDurationHours: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleWriteDuration();
+                      }
+                    }}
+                    placeholder="e.g. 2"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleWriteDuration}
+                    disabled={isWritingDuration}
+                    title="Click or press Enter to write value to hardware"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      backgroundColor: '#2563eb',
+                      borderColor: '#1d4ed8',
+                      cursor: isWritingDuration ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <CornerDownLeft size={16} />
+                    <span>ENTER ↵</span>
+                  </button>
+                </div>
                 {specErrors.testDurationHours && (
                   <div className="form-error-msg">{specErrors.testDurationHours}</div>
                 )}
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
-                  Standard temperature rise test duration (1 to 24 hours).
-                </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    Click <strong>Enter ↵</strong> or press Enter key to write value to hardware.
+                  </span>
+                  {durationSyncStatus && (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        color: durationSyncStatus.includes('✓') ? '#16a34a' : durationSyncStatus.includes('⚠️') ? '#d97706' : '#dc2626',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {durationSyncStatus}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 

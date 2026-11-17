@@ -74,11 +74,11 @@ export class TemperatureLogger {
     }
 
     this.timerId = setInterval(async () => {
-      // Check TEST_ON coil (Coil 10): 1 = log data, 0 = do NOT log data
+      // Check TIMER_START coil (Coil 15): 1 = log data, 0 = do NOT log data
       const allowed = isLoggingAllowed ? isLoggingAllowed() : true;
 
       if (!allowed) {
-        // Logging paused while TEST_ON is 0
+        // Logging paused while TIMER_START is 0
         if (this.onCountdownTickCallback) {
           this.onCountdownTickCallback(this.countdownSeconds, false);
         }

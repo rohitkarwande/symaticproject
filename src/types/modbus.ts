@@ -19,6 +19,11 @@ export interface ModbusAlarms {
   start?: boolean;
   stop?: boolean;
   autoManual?: boolean;
+  alarmReset?: boolean;     // 0X: 11 (ALARM_RESET)
+  impedanceAlarm?: boolean; // 0X: 12 (IMPEDANCE_ALARM)
+  noCurrentAlarm?: boolean; // 0X: 13 (NO_CURRENT_ALARM)
+  cycleCompleted?: boolean; // 0X: 14 (CYCLE_COMPLITED)
+  timerStart?: boolean;     // 0X: 15 (TIMER_START)
 }
 
 export interface DimmerStatus {
@@ -51,6 +56,9 @@ export interface ModbusDataPayload {
   
   // Controls & Parameters
   setpointCurrent: number;
+  setTimer?: number;        // 4X: 57 (SET_TIMER) [Word, Read/Write]
+  actTimerMin?: number;     // 4X: 58 (ACT_TIMER_MIN) [Word, Read]
+  actTimerHrs?: number;     // 4X: 59 (ACT_TIMER_HRS) [Word, Read]
   hysteresis: number;
   ctRange: number;
   
@@ -59,7 +67,12 @@ export interface ModbusDataPayload {
   rawRegisters?: Record<number, number>;
   coils?: Record<number | string, boolean>;
   dimmers?: DimmerStatus;
-  testOn?: boolean; // 0X: 10 (TEST_ON) — Controls automated logging
+  testOn?: boolean;         // 0X: 10 (TEST_ON)
+  alarmReset?: boolean;     // 0X: 11 (ALARM_RESET)
+  impedanceAlarm?: boolean; // 0X: 12 (IMPEDANCE_ALARM)
+  noCurrentAlarm?: boolean; // 0X: 13 (NO_CURRENT_ALARM)
+  cycleCompleted?: boolean; // 0X: 14 (CYCLE_COMPLITED)
+  timerStart?: boolean;     // 0X: 15 (TIMER_START) — Controls automated logging
   
   // HMI Text String Parameters
   customerName?: string;

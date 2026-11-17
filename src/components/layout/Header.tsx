@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Activity, Bell, Clock, Cpu, Network, RefreshCw, Sliders, Settings as SettingsIcon, X } from 'lucide-react';
+import { ShieldCheck, Activity, Bell, Clock, Cpu, Network, RefreshCw, Sliders, X } from 'lucide-react';
 import { useTestContext } from '../../context/TestContext';
 import symaticLogo from '../../assets/symatic_logo.jpg';
 
 export const Header: React.FC = () => {
-  const { activeSession, isTestActive, activeAlarms, modbusStatus, connectModbus, disconnectModbus, setActiveTab } = useTestContext();
+  const { activeSession, isTestActive, activeAlarms, modbusStatus, connectModbus, disconnectModbus } = useTestContext();
   const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString());
   const [showModbusModal, setShowModbusModal] = useState<boolean>(false);
   const [connecting, setConnecting] = useState<boolean>(false);
@@ -19,7 +19,7 @@ export const Header: React.FC = () => {
 
   const handleConnectHardware = async () => {
     setConnecting(true);
-    setMsg(`Connecting to Modbus TCP Hardware at ${modbusStatus.ip || '192.168.0.200'}:${modbusStatus.port || 502}...`);
+    setMsg('Connecting to Hardware Controller...');
     try {
       const success = await connectModbus({
         ip: modbusStatus.ip || '192.168.0.200',
@@ -27,9 +27,9 @@ export const Header: React.FC = () => {
         slaveId: modbusStatus.slaveId || 1,
       });
       if (success) {
-        setMsg(`✓ Connected to ${modbusStatus.ip}:${modbusStatus.port}`);
+        setMsg('✓ Connected to Hardware Controller');
       } else {
-        setMsg(`⚠️ Failed to connect to ${modbusStatus.ip}:${modbusStatus.port}. Check physical cable.`);
+        setMsg('⚠️ Failed to connect to Hardware Controller. Check physical Ethernet cable.');
       }
     } catch (err: any) {
       setMsg(`❌ Connection error: ${err.message}`);
@@ -104,12 +104,12 @@ export const Header: React.FC = () => {
             color: modbusStatus.connected ? '#15803d' : '#b91c1c',
             transition: 'all 0.2s ease',
           }}
-          title="Click to manage Modbus TCP hardware connection"
+          title="Hardware Connection Status"
         >
           <Network size={16} />
           {modbusStatus.connected
-            ? `TCP CONNECTED (${modbusStatus.ip})`
-            : 'MODBUS OFFLINE'}
+            ? 'HARDWARE CONNECTED'
+            : 'HARDWARE OFFLINE'}
         </div>
 
         {/* Test Session Badge */}
@@ -137,15 +137,22 @@ export const Header: React.FC = () => {
         )}
 
         {/* Alarms Counter */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div
-            className={`badge ${activeAlarms.length > 0 ? 'badge-alarm' : 'badge-normal'}`}
-            style={{ padding: '7px 14px' }}
-          >
-            <Bell size={15} />
-            {activeAlarms.length} ALARM{activeAlarms.length !== 1 ? 'S' : ''}
-          </div>
-        </div>
+        {(() => {
+          const filteredActiveAlarms = activeAlarms.filter(
+            (a) => a.alarmId !== 1 && a.alarmCode !== 'ALM-01' && a.alarmName !== 'Over Temperature Limit'
+          );
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div
+                className={`badge ${filteredActiveAlarms.length > 0 ? 'badge-alarm' : 'badge-normal'}`}
+                style={{ padding: '7px 14px' }}
+              >
+                <Bell size={15} />
+                {filteredActiveAlarms.length} ALARM{filteredActiveAlarms.length !== 1 ? 'S' : ''}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Live Clock */}
         <div
@@ -175,7 +182,7 @@ export const Header: React.FC = () => {
             <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f0f7ff', borderBottom: '1px solid #bfdbfe' }}>
               <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0f172a' }}>
                 <Network size={20} color="#2563eb" />
-                Modbus TCP Connection Controls
+                Hardware Controller Connection
               </div>
               <button
                 onClick={() => setShowModbusModal(false)}
@@ -202,13 +209,13 @@ export const Header: React.FC = () => {
                   }}
                 >
                   {modbusStatus.connected
-                    ? '🟢 CONNECTED (REAL HMI)'
-                    : '🔴 MODBUS OFFLINE'}
+                    ? '🟢 CONNECTED (PLC HARDWARE)'
+                    : '🔴 HARDWARE OFFLINE'}
                 </span>
               </div>
 
               <div style={{ fontSize: '12px', color: '#475569', marginBottom: '12px' }}>
-                Target IP: <strong style={{ color: '#0f172a' }}>{modbusStatus.ip || '192.168.0.200'}</strong> | Port: <strong style={{ color: '#0f172a' }}>{modbusStatus.port || 502}</strong> | Unit ID: <strong style={{ color: '#0f172a' }}>{modbusStatus.slaveId || 1}</strong>
+                Hardware Interface: <strong style={{ color: '#0f172a' }}>Industrial Controller (Port 502)</strong> | Unit ID: <strong style={{ color: '#0f172a' }}>1</strong>
               </div>
 
               {msg && (
@@ -225,7 +232,7 @@ export const Header: React.FC = () => {
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px' }}
                 >
                   <RefreshCw size={16} className={connecting ? 'spin' : ''} />
-                  Connect Modbus TCP Hardware
+                  Connect Hardware
                 </button>
 
                 <button
@@ -234,22 +241,12 @@ export const Header: React.FC = () => {
                   disabled={connecting}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', color: '#b91c1c', borderColor: '#fca5a5' }}
                 >
-                  Disconnect Modbus Hardware
+                  Disconnect Hardware
                 </button>
               </div>
             </div>
 
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
-              <button
-                className="btn btn-secondary"
-                onClick={() => {
-                  setActiveTab('settings');
-                  setShowModbusModal(false);
-                }}
-                style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                <SettingsIcon size={14} /> Full Hardware Settings
-              </button>
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
               <button className="btn btn-primary" onClick={() => setShowModbusModal(false)} style={{ fontSize: '12px' }}>
                 Close
               </button>

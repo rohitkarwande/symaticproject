@@ -4,7 +4,6 @@ import {
   FilePlus,
   History,
   AlertTriangle,
-  Settings,
   Activity,
   FileCheck,
 } from 'lucide-react';
@@ -22,7 +21,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'new-test', label: 'New Test', icon: FilePlus },
   { id: 'history', label: 'Test History', icon: History },
   { id: 'alarms', label: 'Alarms Log', icon: AlertTriangle },
-  { id: 'settings', label: 'System Settings', icon: Settings },
 ];
 
 export const Sidebar: React.FC = () => {
@@ -45,11 +43,16 @@ export const Sidebar: React.FC = () => {
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
+          const isDisabled = isTestActive && item.id === 'new-test';
 
           return (
             <button
               key={item.id}
-              onClick={() => navigateWithGuard(item.id)}
+              onClick={() => {
+                if (!isDisabled) navigateWithGuard(item.id);
+              }}
+              disabled={isDisabled}
+              title={isDisabled ? 'Test is currently running. Stop test before creating a new test.' : undefined}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -58,22 +61,24 @@ export const Sidebar: React.FC = () => {
                 borderRadius: '6px',
                 border: 'none',
                 backgroundColor: isActive ? '#2563eb' : 'transparent',
-                color: isActive ? '#ffffff' : '#334155',
+                color: isDisabled ? '#94a3b8' : isActive ? '#ffffff' : '#334155',
                 fontWeight: isActive ? 700 : 600,
                 fontSize: '14px',
-                cursor: 'pointer',
+                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                opacity: isDisabled ? 0.45 : 1,
+                filter: isDisabled ? 'grayscale(80%)' : 'none',
                 textAlign: 'left',
                 transition: 'all 0.15s ease',
                 boxShadow: isActive ? '0 2px 8px rgba(37, 99, 235, 0.3)' : 'none',
               }}
               onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.backgroundColor = '#eff6ff';
+                if (!isActive && !isDisabled) e.currentTarget.style.backgroundColor = '#eff6ff';
               }}
               onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                if (!isActive && !isDisabled) e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              <Icon size={18} color={isActive ? '#ffffff' : '#2563eb'} />
+              <Icon size={18} color={isDisabled ? '#94a3b8' : isActive ? '#ffffff' : '#2563eb'} />
               {item.label}
             </button>
           );
@@ -119,12 +124,12 @@ export const Sidebar: React.FC = () => {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0f172a', fontWeight: 700 }}>
             <Activity size={15} color={modbusStatus.connected ? '#16a34a' : '#dc2626'} />
-            {modbusStatus.connected ? 'HMI Online' : 'HMI Offline'}
+            {modbusStatus.connected ? 'Hardware Online' : 'Hardware Disconnected'}
           </div>
           <p style={{ color: '#64748b', fontSize: '11px', marginTop: '4px', margin: 0 }}>
             {modbusStatus.connected
-              ? `Modbus TCP: ${modbusStatus.ip}`
-              : 'Modbus TCP Disconnected'}
+              ? 'Controller Online'
+              : 'Hardware Disconnected'}
           </p>
         </div>
 

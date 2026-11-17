@@ -28,6 +28,11 @@ export interface ModbusAlarms {
   start?: boolean;
   stop?: boolean;
   autoManual?: boolean;
+  alarmReset?: boolean;     // 0X: 11 (ALARM_RESET)
+  impedanceAlarm?: boolean; // 0X: 12 (IMPEDANCE_ALARM)
+  noCurrentAlarm?: boolean; // 0X: 13 (NO_CURRENT_ALARM)
+  cycleCompleted?: boolean; // 0X: 14 (CYCLE_COMPLITED)
+  timerStart?: boolean;     // 0X: 15 (TIMER_START)
 }
 
 export interface DimmerStatus {
@@ -48,27 +53,42 @@ export interface ModbusDataPayload {
   currents: PhaseValues; // R, Y, B (from Holding Registers 49, 51, 53)
   outputCurrents: PhaseValues;
   setpointCurrent: number;
+  setTimer?: number;        // 4X: 57 (SET_TIMER)
+  actTimerMin?: number;     // 4X: 58 (ACT_TIMER_MIN)
+  actTimerHrs?: number;     // 4X: 59 (ACT_TIMER_HRS)
   hysteresis: number;
   ctRange: number;
   alarms: ModbusAlarms;
   rawRegisters?: Record<number, number>;
   coils?: Record<number | string, boolean>;
   dimmers?: DimmerStatus;
-  testOn?: boolean;
+  testOn?: boolean;         // 0X: 10
+  alarmReset?: boolean;     // 0X: 11
+  impedanceAlarm?: boolean; // 0X: 12
+  noCurrentAlarm?: boolean; // 0X: 13
+  cycleCompleted?: boolean; // 0X: 14
+  timerStart?: boolean;     // 0X: 15
 }
+
+export const PREDEFINED_MODBUS_IP = '192.168.0.200';
+export const PREDEFINED_MODBUS_PORT = 502;
+export const PREDEFINED_MODBUS_SLAVE_ID = 1;
 
 export class ModbusTcpService extends EventEmitter {
   private socket: net.Socket | null = null;
   private config: ModbusServiceConfig = {
-    ip: '192.168.0.200',
-    port: 502,
-    slaveId: 1,
+    ip: PREDEFINED_MODBUS_IP,
+    port: PREDEFINED_MODBUS_PORT,
+    slaveId: PREDEFINED_MODBUS_SLAVE_ID,
     pollingIntervalMs: 500,
   };
 
   private connected: boolean = false;
   private transactionId: number = 1;
   private pollTimer: NodeJS.Timeout | null = null;
+  private autoReconnectTimer: NodeJS.Timeout | null = null;
+  private isConnecting: boolean = false;
+  private failedPollCount: number = 0;
   private isPolling: boolean = false;
   private detectedPduOffset: number | null = null;
   private detectedCoilPduOffset: number | null = null;
@@ -77,6 +97,7 @@ export class ModbusTcpService extends EventEmitter {
 
   constructor() {
     super();
+    this.startAutoConnectLoop();
   }
 
   public getConfig(): ModbusServiceConfig {
@@ -88,11 +109,34 @@ export class ModbusTcpService extends EventEmitter {
   }
 
   public updateConfig(newConfig: Partial<ModbusServiceConfig>) {
-    this.config = { ...this.config, ...newConfig };
+    this.config = {
+      ...this.config,
+      ip: PREDEFINED_MODBUS_IP,
+      port: PREDEFINED_MODBUS_PORT,
+      slaveId: PREDEFINED_MODBUS_SLAVE_ID,
+      ...newConfig,
+    };
+  }
+
+  public startAutoConnectLoop() {
+    if (this.autoReconnectTimer) return;
+    this.autoReconnectTimer = setInterval(async () => {
+      if (!this.connected && !this.isConnecting) {
+        this.isConnecting = true;
+        try {
+          await this.connect();
+        } catch {
+          // Retry on next interval
+        } finally {
+          this.isConnecting = false;
+        }
+      }
+    }, 1500);
   }
 
   public async connect(): Promise<boolean> {
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.destroy();
       this.socket = null;
     }
@@ -101,15 +145,15 @@ export class ModbusTcpService extends EventEmitter {
       let isResolved = false;
 
       this.socket = new net.Socket();
-      this.socket.setTimeout(3000);
+      this.socket.setTimeout(2500);
 
       this.socket.connect(this.config.port, this.config.ip, () => {
-        console.log(`[Modbus TCP] Connected to HMI hardware at ${this.config.ip}:${this.config.port}`);
+        console.log(`[Modbus TCP] Connected to hardware at ${this.config.ip}:${this.config.port}`);
         this.connected = true;
+        this.failedPollCount = 0;
         this.detectedPduOffset = null;
-    this.detectedCoilPduOffset = null;
         this.detectedCoilPduOffset = null;
-        this.socket?.setTimeout(0); // Disable connection idle timeout once established
+        this.socket?.setTimeout(0); // Disable idle timeout once connected
         this.emit('status', {
           connected: true,
           ip: this.config.ip,
@@ -129,9 +173,7 @@ export class ModbusTcpService extends EventEmitter {
       });
 
       this.socket.on('error', (err) => {
-        console.warn(`[Modbus TCP] Socket error (${this.config.ip}:${this.config.port}):`, err.message);
-        this.connected = false;
-        this.emit('status', { connected: false, error: err.message });
+        this.handleDisconnect(err.message);
         if (!isResolved) {
           isResolved = true;
           resolve(false);
@@ -139,9 +181,7 @@ export class ModbusTcpService extends EventEmitter {
       });
 
       this.socket.on('close', () => {
-        console.log('[Modbus TCP] Socket connection closed');
-        this.connected = false;
-        this.emit('status', { connected: false });
+        this.handleDisconnect('Socket connection closed');
         if (!isResolved) {
           isResolved = true;
           resolve(false);
@@ -149,10 +189,7 @@ export class ModbusTcpService extends EventEmitter {
       });
 
       this.socket.on('timeout', () => {
-        console.warn('[Modbus TCP] Socket connection timeout');
-        if (this.socket) this.socket.destroy();
-        this.connected = false;
-        this.emit('status', { connected: false, error: `Connection timeout: No server responding at ${this.config.ip}:${this.config.port}` });
+        this.handleDisconnect(`Connection timeout at ${this.config.ip}:${this.config.port}`);
         if (!isResolved) {
           isResolved = true;
           resolve(false);
@@ -161,19 +198,44 @@ export class ModbusTcpService extends EventEmitter {
     });
   }
 
-  public disconnect() {
+  public handleDisconnect(reason?: string) {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.destroy();
       this.socket = null;
     }
+    const wasConnected = this.connected;
     this.connected = false;
     this.detectedPduOffset = null;
     this.detectedCoilPduOffset = null;
-    this.emit('status', { connected: false });
+    this.failedPollCount = 0;
+
+    if (wasConnected) {
+      console.warn(`[Modbus TCP] Hardware disconnected: ${reason || 'cable removed'}`);
+      this.emit('status', { connected: false, error: reason });
+      this.emit('data', {
+        connected: false,
+        timestamp: new Date().toISOString(),
+        temperatures: {},
+        currents: { r: 0, y: 0, b: 0 },
+        voltages: { r: 0, y: 0, b: 0 },
+        outputCurrents: { r: 0, y: 0, b: 0 },
+        setpointCurrent: 0,
+        hysteresis: 0,
+        ctRange: 2000,
+        alarms: { phaseFail: false, thermalOverload: false, dimMinR: false, dimMinY: false, dimMinB: false, alarmBit: false, testOn: false },
+        coils: {},
+        dimmers: { rDimmerZero: false, yDimmerZero: false, bDimmerZero: false, rDimmerMax: false, yDimmerMax: false, bDimmerMax: false },
+      });
+    }
+  }
+
+  public disconnect() {
+    this.handleDisconnect('User requested disconnect');
   }
 
   private startPolling() {
@@ -207,31 +269,34 @@ export class ModbusTcpService extends EventEmitter {
       // Current Y Phase_OP_MTR: Holding Register 4X 51 (2 words, 32-bit Float)
       // Current B Phase_OP_MTR: Holding Register 4X 53 (2 words, 32-bit Float)
       // SET_CURRENT: Holding Register 4X 55 (2 words, 32-bit Float)
-      // Total contiguous span: 56 holding registers (112 bytes)
+      // SET_TIMER: Holding Register 4X 57 (1 word, Word)
+      // ACT_TIMER_MIN: Holding Register 4X 58 (1 word, Word)
+      // ACT_TIMER_HRS: Holding Register 4X 59 (1 word, Word)
+      // Total contiguous span: 60 holding registers (120 bytes)
 
       let bulkBuffer: Buffer | null = null;
       let startPdu = this.detectedPduOffset ?? 0;
 
       if (this.detectedPduOffset !== null) {
         // Use cached PDU offset
-        bulkBuffer = await this.readHoldingRegisters(this.detectedPduOffset, 56);
+        bulkBuffer = await this.readHoldingRegisters(this.detectedPduOffset, 60);
       } else {
-        // Auto-detect: Try 1-based PDU address 0 (4X 1 = PDU 0) for 56 registers
-        bulkBuffer = await this.readHoldingRegisters(0, 56);
-        if (bulkBuffer && bulkBuffer.length >= 112) {
+        // Auto-detect: Try 1-based PDU address 0 (4X 1 = PDU 0) for 60 registers
+        bulkBuffer = await this.readHoldingRegisters(0, 60);
+        if (bulkBuffer && bulkBuffer.length >= 120) {
           startPdu = 0;
           this.detectedPduOffset = 0;
         } else {
-          // Try 0-based PDU address 1 (4X 1 = PDU 1) for 56 registers
-          bulkBuffer = await this.readHoldingRegisters(1, 56);
-          if (bulkBuffer && bulkBuffer.length >= 112) {
+          // Try 0-based PDU address 1 (4X 1 = PDU 1) for 60 registers
+          bulkBuffer = await this.readHoldingRegisters(1, 60);
+          if (bulkBuffer && bulkBuffer.length >= 120) {
             startPdu = 1;
             this.detectedPduOffset = 1;
           }
         }
       }
 
-      // If bulk 56-register read failed (e.g. PLC max packet limitation), split into chunks
+      // If bulk 60-register read failed (e.g. PLC max packet limitation), split into chunks
       let tempBuffer: Buffer | null = null;
       let currentBuffer: Buffer | null = null;
 
@@ -246,9 +311,20 @@ export class ModbusTcpService extends EventEmitter {
             this.detectedPduOffset = 1;
           }
         }
-        // Read 8 registers (Starting at Address 49: R, Y, B currents + SET_CURRENT)
+        // Read 12 registers (Starting at Address 49: R, Y, B currents + SET_CURRENT + SET_TIMER + ACT_TIMERS)
         const currentPdu = (this.detectedPduOffset ?? startPdu) === 0 ? 48 : 49;
-        currentBuffer = await this.readHoldingRegisters(currentPdu, 8);
+        currentBuffer = await this.readHoldingRegisters(currentPdu, 12);
+      }
+
+      // Check if hardware stopped responding (Ethernet cable disconnected)
+      if (!bulkBuffer && !tempBuffer && !currentBuffer) {
+        this.failedPollCount++;
+        if (this.failedPollCount >= 2) {
+          this.handleDisconnect('Ethernet cable disconnected / controller offline');
+          return;
+        }
+      } else {
+        this.failedPollCount = 0;
       }
 
       const temps: Record<number, number> = {};
@@ -279,11 +355,15 @@ export class ModbusTcpService extends EventEmitter {
       }
 
       // Parse 3-Phase Currents (Registers 49, 51, 53 — 2 words each Word-Swapped Float32 CD AB) and SET_CURRENT (Register 55)
-      const cBuf = bulkBuffer ? bulkBuffer.subarray(96, 112) : currentBuffer;
+      // Plus SET_TIMER (57), ACT_TIMER_MIN (58), ACT_TIMER_HRS (59)
+      const cBuf = bulkBuffer ? bulkBuffer.subarray(96, 120) : currentBuffer;
       let currR = 0;
       let currY = 0;
       let currB = 0;
       let setpointCurrent = 0;
+      let setTimer = 0;
+      let actTimerMin = 0;
+      let actTimerHrs = 0;
 
       if (cBuf && cBuf.length >= 12) {
         rawRegs[49] = cBuf.readUInt16BE(0);
@@ -302,6 +382,19 @@ export class ModbusTcpService extends EventEmitter {
           rawRegs[56] = cBuf.readUInt16BE(14);
           setpointCurrent = this.parse32BitValue(cBuf, 12);
         }
+
+        if (cBuf.length >= 18) {
+          rawRegs[57] = cBuf.readUInt16BE(16);
+          setTimer = rawRegs[57];
+        }
+        if (cBuf.length >= 20) {
+          rawRegs[58] = cBuf.readUInt16BE(18);
+          actTimerMin = rawRegs[58];
+        }
+        if (cBuf.length >= 22) {
+          rawRegs[59] = cBuf.readUInt16BE(20);
+          actTimerHrs = rawRegs[59];
+        }
       }
 
       const currents: PhaseValues = {
@@ -310,7 +403,7 @@ export class ModbusTcpService extends EventEmitter {
         b: currB,
       };
 
-      // --- Read Coils 0X 1..16 (START=1, STOP=2, ALARM_DIM_MIN_R=3, ALARM_DIM_MIN_Y=4, ALARM_DIM_MIN_B=5, DIMMER_MAX_SW_R=6, DIMMER_MAX_SW_Y=7, DIMMER_MAX_SW_B=8, AUTO_MANUAL=9) ---
+      // --- Read Coils 0X 1..16 (START=1, STOP=2, ALARM_DIM_MIN_R=3..5, DIMMER_MAX_SW_R=6..8, AUTO_MANUAL=9, TEST_ON=10, ALARM_RESET=11, IMPEDANCE_ALARM=12, NO_CURRENT_ALARM=13, CYCLE_COMPLITED=14, TIMER_START=15) ---
       let coilBuffer: Buffer | null = null;
       if (this.detectedCoilPduOffset !== null) {
         coilBuffer = await this.readCoils(this.detectedCoilPduOffset, 16);
@@ -344,7 +437,12 @@ export class ModbusTcpService extends EventEmitter {
       const dimMaxY = Boolean(coilsMap[7]);
       const dimMaxB = Boolean(coilsMap[8]);
       const autoManual = Boolean(coilsMap[9]);
-      const testOn = Boolean(coilsMap[10]); // 0X: 10 (TEST_ON)
+      const testOn = Boolean(coilsMap[10]);             // 0X: 10 (TEST_ON)
+      const alarmReset = Boolean(coilsMap[11]);         // 0X: 11 (ALARM_RESET)
+      const impedanceAlarm = Boolean(coilsMap[12]);     // 0X: 12 (IMPEDANCE_ALARM)
+      const noCurrentAlarm = Boolean(coilsMap[13]);     // 0X: 13 (NO_CURRENT_ALARM)
+      const cycleCompleted = Boolean(coilsMap[14]);     // 0X: 14 (CYCLE_COMPLITED)
+      const timerStart = Boolean(coilsMap[15]);         // 0X: 15 (TIMER_START)
 
       const payload: ModbusDataPayload = {
         connected: true,
@@ -355,10 +453,18 @@ export class ModbusTcpService extends EventEmitter {
         currents,
         outputCurrents: currents,
         setpointCurrent,
+        setTimer,
+        actTimerMin,
+        actTimerHrs,
         hysteresis: 0,
         ctRange: 2000,
         rawRegisters: rawRegs,
-        testOn, // Coil 0X: 10
+        testOn,
+        alarmReset,
+        impedanceAlarm,
+        noCurrentAlarm,
+        cycleCompleted,
+        timerStart,
         coils: {
           ...coilsMap,
           start: startCoil,
@@ -371,7 +477,17 @@ export class ModbusTcpService extends EventEmitter {
           dimMaxB,
           autoManual,
           testOn,
+          alarmReset,
+          impedanceAlarm,
+          noCurrentAlarm,
+          cycleCompleted,
+          timerStart,
           10: testOn,
+          11: alarmReset,
+          12: impedanceAlarm,
+          13: noCurrentAlarm,
+          14: cycleCompleted,
+          15: timerStart,
         },
         dimmers: {
           rDimmerZero: dimMinR,
@@ -390,11 +506,16 @@ export class ModbusTcpService extends EventEmitter {
           dimMaxR,
           dimMaxY,
           dimMaxB,
-          alarmBit: dimMinR || dimMinY || dimMinB || dimMaxR || dimMaxY || dimMaxB,
+          alarmBit: dimMinR || dimMinY || dimMinB || dimMaxR || dimMaxY || dimMaxB || impedanceAlarm || noCurrentAlarm,
           testOn,
           start: startCoil,
           stop: stopCoil,
           autoManual,
+          alarmReset,
+          impedanceAlarm,
+          noCurrentAlarm,
+          cycleCompleted,
+          timerStart,
         },
       };
 
@@ -648,6 +769,7 @@ export class ModbusTcpService extends EventEmitter {
       return false;
     }
 
+    const pduAddress = (this.detectedPduOffset ?? 0) === 1 ? address : (address >= 1 ? address - 1 : address);
     const tId = this.getNextTransactionId();
     const frame = Buffer.alloc(12);
     frame.writeUInt16BE(tId, 0);
@@ -655,12 +777,28 @@ export class ModbusTcpService extends EventEmitter {
     frame.writeUInt16BE(6, 4);
     frame.writeUInt8(this.config.slaveId, 6);
     frame.writeUInt8(6, 7); // FC 06 Write Single Register
-    frame.writeUInt16BE(address, 8);
-    frame.writeUInt16BE(value, 10);
+    frame.writeUInt16BE(pduAddress, 8);
+    frame.writeUInt16BE(Math.round(value) & 0xffff, 10);
 
     return new Promise((resolve) => {
-      this.socket?.write(frame);
-      resolve(true);
+      this.pendingRequests.set(tId, {
+        resolve: () => resolve(true),
+        reject: () => resolve(false),
+      });
+
+      this.socket?.write(frame, (err) => {
+        if (err) {
+          this.pendingRequests.delete(tId);
+          resolve(false);
+        }
+      });
+
+      setTimeout(() => {
+        if (this.pendingRequests.has(tId)) {
+          this.pendingRequests.delete(tId);
+          resolve(true);
+        }
+      }, 400);
     });
   }
 

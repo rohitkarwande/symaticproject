@@ -17,6 +17,8 @@ export const TestPreview: React.FC = () => {
       // Navigate to live dashboard and activate test session (No register address configured here)
       startTestSession();
       setActiveTab('dashboard');
+    } catch (err) {
+      console.error('[TestPreview] Error starting test session:', err);
     } finally {
       setStarting(false);
     }

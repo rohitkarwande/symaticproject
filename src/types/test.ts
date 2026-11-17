@@ -85,7 +85,7 @@ export interface TemperatureLogRow {
   };
 }
 
-export type TestStatus = 'idle' | 'configuring' | 'preview' | 'running' | 'paused' | 'completed' | 'cancelled';
+export type TestStatus = 'idle' | 'configuring' | 'preview' | 'running' | 'paused' | 'completed' | 'cancelled' | 'aborted';
 
 export interface PointTestResult {
   pointId: number;
@@ -106,6 +106,8 @@ export interface FinalTestResults {
   passCount: number;
   failCount: number;
   pointResults: PointTestResult[];
+  cycleAborted?: boolean;
+  abortReason?: string;
 }
 
 export interface TestSession {
@@ -123,4 +125,5 @@ export interface TestSession {
   observations?: string;
   operatorName?: string;
   finalResults?: FinalTestResults;
+  abortReason?: string;
 }

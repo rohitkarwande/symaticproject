@@ -97,7 +97,7 @@ export const TestHistoryView: React.FC = () => {
               <th style={{ padding: '12px', textAlign: 'left' }}>Start Timestamp</th>
               <th style={{ padding: '12px', textAlign: 'right' }}>Max Temp</th>
               <th style={{ padding: '12px', textAlign: 'right' }}>Max Rise (ΔT)</th>
-              <th style={{ padding: '12px', textAlign: 'center' }}>Result</th>
+
               <th style={{ padding: '12px', textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>

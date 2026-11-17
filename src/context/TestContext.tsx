@@ -16,6 +16,14 @@ import { temperatureLoggerSingleton } from '../services/logging/TemperatureLogge
 
 export type ActiveTab = 'dashboard' | 'new-test' | 'preview' | 'history' | 'alarms' | 'settings' | 'results';
 
+export interface HardwarePopupState {
+  type: 'impedance_alarm' | 'no_current_alarm' | 'cycle_completed';
+  title: string;
+  code: string;
+  description: string;
+  isAbort: boolean;
+}
+
 interface TestContextType {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
@@ -35,7 +43,7 @@ interface TestContextType {
   // Active Test state
   activeSession: TestSession | null;
   startTestSession: () => void;
-  endTestSession: () => FinalTestResults;
+  endTestSession: (status?: 'completed' | 'aborted', abortReason?: string) => FinalTestResults;
   isTestActive: boolean;
 
   // Live sensor & alarms
@@ -45,6 +53,8 @@ interface TestContextType {
   dismissAlarmPopup: () => void;
   acknowledgeAlarm: (eventId: string) => void;
   triggerMockAlarm: (alarmId: number, description?: string) => void;
+  hardwarePopup: HardwarePopupState | null;
+  resetHardwarePopup: () => Promise<void>;
   nextLogCountdown: number;
   isLoggingActive: boolean;
 
@@ -73,6 +83,9 @@ interface TestContextType {
   ) => Promise<boolean>;
   writeSetCurrentToModbus: (
     current: number
+  ) => Promise<{ success: boolean; message: string }>;
+  writeSetTimerToModbus: (
+    duration: number
   ) => Promise<{ success: boolean; message: string }>;
   writeTestSpecificationToModbus: (
     spec?: { ratedVoltage: number; ratedCurrent: number; testCurrent: number },
@@ -104,7 +117,7 @@ const BLANK_CONFIG: TestConfig = {
     serialNumber: '',
   },
   equipment: {
-    equipmentName: '',
+    equipmentName: 'Temperature Rise Tester',
     model: '',
     make: '',
     serialNumber: '',
@@ -115,8 +128,8 @@ const BLANK_CONFIG: TestConfig = {
     testDurationHours: 1, // Default 1 hour
     sensorCount: 48, // Default 48 channels
     logIntervalMinutes: 1, // Default 1 min logging
-    ratedVoltage: 0,
-    ratedCurrent: 0,
+    ratedVoltage: '',
+    ratedCurrent: '',
     ambientTemp: 25,
     limitTempRise: 65,
   },
@@ -135,6 +148,7 @@ const getInitialConfig = (): TestConfig => {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed?.customer && parsed?.equipment && parsed?.specification && parsed?.testObject) {
+        parsed.equipment.equipmentName = 'Temperature Rise Tester';
         return parsed;
       }
     }
@@ -162,6 +176,12 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sensors, setSensors] = useState<SensorPoint[]>([]);
   const [activeAlarms, setActiveAlarms] = useState<AlarmEvent[]>([]);
   const [alarmPopupEvent, setAlarmPopupEvent] = useState<AlarmEvent | null>(null);
+  const [hardwarePopup, setHardwarePopup] = useState<HardwarePopupState | null>(null);
+  const hardwareTriggeredRef = useRef<{ impedance: boolean; noCurrent: boolean; cycleCompleted: boolean }>({
+    impedance: false,
+    noCurrent: false,
+    cycleCompleted: false,
+  });
   const [nextLogCountdown, setNextLogCountdown] = useState<number>(60);
   const [isLoggingActive, setIsLoggingActive] = useState<boolean>(false);
 
@@ -191,6 +211,15 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isTestActive = activeSession?.status === 'running';
 
+  const dimmerAlarmTriggeredRef = useRef<{ [k: string]: boolean }>({
+    rZero: false,
+    yZero: false,
+    bZero: false,
+    rMax: false,
+    yMax: false,
+    bMax: false,
+  });
+
   // Load persisted historical tests & attach Modbus IPC listeners
   useEffect(() => {
     const ambient = Number(draftConfig.specification.ambientTemp) || 25;
@@ -212,6 +241,10 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     alarmManagerSingleton.setAlarmTriggerCallback((evt) => {
+      // Over temperature limit alarm removed completely per user specification
+      if (evt.alarmId === 1 || evt.alarmCode === 'ALM-01' || evt.alarmName === 'Over Temperature Limit') {
+        return;
+      }
       setActiveAlarms(alarmManagerSingleton.getActiveEvents());
       setAlarmPopupEvent(evt);
       dbProvider.saveAlarmEvent(evt);
@@ -264,12 +297,126 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
         }
 
-        // Evaluate incoming hardware START and STOP coils from PLC (Read support)
+        // Evaluate incoming hardware START, STOP, ALARMS & CYCLE_COMPLITED coils from PLC (Read support)
         if (payload.coils) {
           const isHardwareStop = Boolean(payload.coils.stop || payload.coils[2]);
           if (isHardwareStop && activeSessionRef.current?.status === 'running') {
             console.log('[Modbus TCP] Received STOP coil signal from PLC hardware (0X: 2). Ending test session...');
-            endTestSession();
+            endTestSession('completed');
+          }
+
+          // Dimmer Alarms tracking (Coils 3..8: R/Y/B Dimmer Zero and R/Y/B Dimmer Max)
+          const rZero = Boolean(payload.coils[3] ?? payload.coils.dimMinR);
+          const yZero = Boolean(payload.coils[4] ?? payload.coils.dimMinY);
+          const bZero = Boolean(payload.coils[5] ?? payload.coils.dimMinB);
+          const rMax = Boolean(payload.coils[6] ?? payload.coils.dimMaxR);
+          const yMax = Boolean(payload.coils[7] ?? payload.coils.dimMaxY);
+          const bMax = Boolean(payload.coils[8] ?? payload.coils.dimMaxB);
+
+          // Dimmer limits track state for dashboard indicators & START button lock (not recorded in alarm logs per user request)
+          dimmerAlarmTriggeredRef.current = {
+            rZero,
+            yZero,
+            bZero,
+            rMax,
+            yMax,
+            bMax,
+          };
+
+          // 1. IMPEDANCE_ALARM (0X: 12)
+          const isImpedance = Boolean(payload.coils[12] ?? payload.coils.impedanceAlarm);
+          if (isImpedance && activeSessionRef.current?.status === 'running' && !hardwareTriggeredRef.current.impedance) {
+            hardwareTriggeredRef.current.impedance = true;
+            console.warn('[Modbus TCP] IMPEDANCE_ALARM triggered from PLC!');
+            const testId = activeSessionRef.current.testId;
+            const impEvt: AlarmEvent = {
+              id: `EVT-IMP-${Date.now()}`,
+              testId,
+              alarmId: 12,
+              alarmCode: 'ALM-IMP',
+              alarmName: 'Impedance Alarm',
+              severity: 'critical',
+              description: 'CURRENT SETPOINT NOT ACHIEVED',
+              timestamp: new Date().toLocaleTimeString(),
+              acknowledged: false,
+            };
+            alarmManagerSingleton.recordAlarmEvent(impEvt);
+            dbProvider.saveAlarmEvent(impEvt);
+            setActiveAlarms((prev) => [...prev.filter((e) => e.alarmCode !== 'ALM-IMP'), impEvt]);
+
+            setHardwarePopup({
+              type: 'impedance_alarm',
+              title: 'IMPEDANCE ALARM',
+              code: 'ALM-IMP',
+              description: 'CURRENT SETPOINT NOT ACHIEVED',
+              isAbort: true,
+            });
+          } else if (!isImpedance) {
+            hardwareTriggeredRef.current.impedance = false;
+          }
+
+          // 2. NO_CURRENT_ALARM (0X: 13)
+          const isNoCurrent = Boolean(payload.coils[13] ?? payload.coils.noCurrentAlarm);
+          if (isNoCurrent && activeSessionRef.current?.status === 'running' && !hardwareTriggeredRef.current.noCurrent) {
+            hardwareTriggeredRef.current.noCurrent = true;
+            console.warn('[Modbus TCP] NO_CURRENT_ALARM triggered from PLC!');
+            const testId = activeSessionRef.current.testId;
+            const noCurrEvt: AlarmEvent = {
+              id: `EVT-NOCURR-${Date.now()}`,
+              testId,
+              alarmId: 13,
+              alarmCode: 'ALM-NOCURR',
+              alarmName: 'No Current Alarm',
+              severity: 'critical',
+              description: 'NO CURRENT FLOW',
+              timestamp: new Date().toLocaleTimeString(),
+              acknowledged: false,
+            };
+            alarmManagerSingleton.recordAlarmEvent(noCurrEvt);
+            dbProvider.saveAlarmEvent(noCurrEvt);
+            setActiveAlarms((prev) => [...prev.filter((e) => e.alarmCode !== 'ALM-NOCURR'), noCurrEvt]);
+
+            setHardwarePopup({
+              type: 'no_current_alarm',
+              title: 'NO CURRENT ALARM',
+              code: 'ALM-NOCURR',
+              description: 'NO CURRENT FLOW',
+              isAbort: true,
+            });
+          } else if (!isNoCurrent) {
+            hardwareTriggeredRef.current.noCurrent = false;
+          }
+
+          // 3. CYCLE_COMPLITED (0X: 14)
+          const isCycleComp = Boolean(payload.coils[14] ?? payload.coils.cycleCompleted);
+          if (isCycleComp && activeSessionRef.current?.status === 'running' && !hardwareTriggeredRef.current.cycleCompleted) {
+            hardwareTriggeredRef.current.cycleCompleted = true;
+            console.log('[Modbus TCP] CYCLE_COMPLITED triggered from PLC!');
+            const testId = activeSessionRef.current.testId;
+            const cycleEvt: AlarmEvent = {
+              id: `EVT-CYCLE-${Date.now()}`,
+              testId,
+              alarmId: 14,
+              alarmCode: 'ALM-CYCLE',
+              alarmName: 'Cycle Completed',
+              severity: 'info',
+              description: 'Hardware test cycle completed signal received.',
+              timestamp: new Date().toLocaleTimeString(),
+              acknowledged: true,
+            };
+            alarmManagerSingleton.recordAlarmEvent(cycleEvt);
+            dbProvider.saveAlarmEvent(cycleEvt);
+            setActiveAlarms((prev) => [...prev.filter((e) => e.alarmCode !== 'ALM-CYCLE'), cycleEvt]);
+
+            setHardwarePopup({
+              type: 'cycle_completed',
+              title: 'CYCLE COMPLETED',
+              code: 'ALM-CYCLE',
+              description: 'The temperature rise test cycle has successfully completed on the hardware controller.',
+              isAbort: false,
+            });
+          } else if (!isCycleComp) {
+            hardwareTriggeredRef.current.cycleCompleted = false;
           }
         }
       });
@@ -319,14 +466,14 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return {
         success: ok,
         message: ok
-          ? `✅ Written Coil status to Address ${address} (Modbus PDU ${pduAddress}, FC 05) = ${state ? 'ON (1 / 0xFF00)' : 'OFF (0 / 0x0000)'}`
-          : `❌ Failed to write Coil status to Modbus address ${address}`,
+          ? `✅ Updated Coil ${address} = ${state ? 'ON' : 'OFF'}`
+          : `❌ Failed to update Coil ${address}`,
         writtenCoils: [{ address, state }],
       };
     }
     return {
       success: false,
-      message: `❌ Modbus TCP hardware unavailable. Run in Desktop Electron application.`,
+      message: `❌ Hardware unavailable. Run in Desktop Electron application.`,
       writtenCoils: [],
     };
   };
@@ -340,7 +487,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await writeCoilStatusToModbus(address, false);
       return {
         success: true,
-        message: `Pulsed coil 0X: ${address} (HIGH for ${durationMs}ms then reset to LOW)`,
+        message: `Pulsed signal ${address} (HIGH for ${durationMs}ms then reset to LOW)`,
       };
     }
   };
@@ -366,13 +513,30 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return {
         success: ok,
         message: ok
-          ? `✅ Successfully written SET_CURRENT to Register 4X: 55: ${current.toFixed(1)} A`
-          : `❌ Failed to write SET_CURRENT to Register 4X: 55 (Hardware offline or not responding)`,
+          ? `✅ Successfully updated SET CURRENT: ${current.toFixed(1)} A`
+          : `❌ Failed to update SET CURRENT (Hardware offline or not responding)`,
       };
     }
     return {
       success: false,
-      message: `❌ Desktop Electron environment required for Modbus TCP write`,
+      message: `❌ Desktop Electron environment required for hardware write`,
+    };
+  };
+
+  const writeSetTimerToModbus = async (duration: number): Promise<{ success: boolean; message: string }> => {
+    if (window.electronAPI?.modbus?.writeRegister) {
+      // SET_TIMER register is 4X: 57, length 1 word (FC 06 Write Single Register)
+      const ok = await window.electronAPI.modbus.writeRegister(57, Math.round(duration));
+      return {
+        success: ok,
+        message: ok
+          ? `✅ Successfully updated SET TIMER: ${duration} hours`
+          : `❌ Failed to update SET TIMER (Hardware offline or not responding)`,
+      };
+    }
+    return {
+      success: false,
+      message: `❌ Desktop Electron environment required for hardware write`,
     };
   };
 
@@ -394,7 +558,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return {
       success: false,
-      message: `❌ Modbus TCP hardware unavailable. Run in Desktop Electron application.`,
+      message: `❌ Hardware unavailable. Run in Desktop Electron application.`,
       writtenRegisters: [],
     };
   };
@@ -449,6 +613,11 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const navigateWithGuard = (targetTab: ActiveTab): boolean => {
+    if (targetTab === 'new-test') {
+      if (isTestActive) return false;
+      setActiveTab('new-test');
+      return true;
+    }
     if (isTestActive && targetTab !== 'dashboard') {
       setPendingNavTab(targetTab);
       setShowNavGuardModal(true);
@@ -493,8 +662,14 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setHasPreviousConfig(true);
     } catch {}
 
-    // Create session in local database (without logging temperature row until TEST_ON is 1)
+    // Create session in local database (without logging temperature row until TIMER_START is 1)
     dbProvider.createTestSession(draftConfig, testId, durationSeconds);
+
+    // Clean alarm state for new test session
+    alarmManagerSingleton.resetForNewTest(testId);
+    dimmerAlarmTriggeredRef.current = { rZero: false, yZero: false, bZero: false, rMax: false, yMax: false, bMax: false };
+    hardwareTriggeredRef.current = { impedance: false, noCurrent: false, cycleCompleted: false };
+    setHardwarePopup(null);
 
     const newSession: TestSession = {
       testId,
@@ -505,7 +680,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       elapsedSeconds: 0,
       remainingSeconds: durationSeconds,
       sensors: initialSensors,
-      temperatureLogs: [], // Clean initialization: only starts logging when Coil 10 (TEST_ON) is 1
+      temperatureLogs: [], // Clean initialization: only starts logging when Coil 15 (TIMER_START) is 1
       alarmEvents: [],
     };
 
@@ -533,7 +708,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logIntervalMinutes,
       sensorCount,
       () => modbusDataRef.current?.currents || { r: 0, y: 0, b: 0 },
-      () => Boolean(modbusDataRef.current?.testOn ?? modbusDataRef.current?.coils?.[10])
+      () => Boolean(modbusDataRef.current?.timerStart ?? modbusDataRef.current?.coils?.[15])
     );
 
     setActiveTab('dashboard');
@@ -619,7 +794,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   };
 
-  const endTestSession = (): FinalTestResults => {
+  const endTestSession = (status: 'completed' | 'aborted' = 'completed', abortReason?: string): FinalTestResults => {
     // 1-Second Pulse to STOP coil (0X: 2) and reset START (0X: 1)
     pulseCoilToModbus(2, 1000);
     writeCoilStatusToModbus(1, false);
@@ -634,10 +809,16 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const endTimestamp = new Date().toLocaleString();
     const finalRes = calculateFinalResults(activeSession);
+    if (status === 'aborted') {
+      finalRes.overallPass = false;
+      finalRes.cycleAborted = true;
+      finalRes.abortReason = abortReason;
+    }
 
     const completedSession: TestSession = {
       ...activeSession,
-      status: 'completed',
+      status,
+      abortReason,
       endTimestamp,
       finalResults: finalRes,
       alarmEvents: alarmManagerSingleton.getEventHistory(),
@@ -651,6 +832,24 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setActiveTab('results');
     return finalRes;
+  };
+
+  const resetHardwarePopup = async () => {
+    if (!hardwarePopup) return;
+
+    const currentPopup = hardwarePopup;
+    setHardwarePopup(null);
+
+    // Pulse ALARM_RESET register (Coil 0X: 11) for 1 second
+    await pulseCoilToModbus(11, 1000);
+
+    if (currentPopup.isAbort) {
+      endTestSession('aborted', currentPopup.description || currentPopup.title);
+    } else {
+      endTestSession('completed');
+    }
+
+    setActiveTab('results');
   };
 
   const dismissAlarmPopup = () => {
@@ -697,6 +896,8 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dismissAlarmPopup,
         acknowledgeAlarm,
         triggerMockAlarm,
+        hardwarePopup,
+        resetHardwarePopup,
         nextLogCountdown,
         isLoggingActive,
         modbusStatus,
@@ -709,6 +910,7 @@ export const TestProvider: React.FC<{ children: React.ReactNode }> = ({ children
         readCoilsFromModbus,
         writeFloatRegisterToModbus,
         writeSetCurrentToModbus,
+        writeSetTimerToModbus,
         writeTestSpecificationToModbus,
         testHistory,
         selectedHistoryTest,

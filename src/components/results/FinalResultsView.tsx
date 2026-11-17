@@ -10,7 +10,6 @@ import {
   Sliders,
   Box,
   Thermometer,
-  FileText,
   AlertTriangle,
   PenTool,
 } from 'lucide-react';
@@ -40,41 +39,27 @@ export const FinalResultsView: React.FC = () => {
   }
 
   const config = session.config;
-  const isOverallPass = results.overallPass;
+  const isAborted = session.status === 'aborted' || Boolean(results.cycleAborted);
+  const isOverallPass = !isAborted && results.overallPass;
   const rawLogs = session.temperatureLogs || (session as any).logs || [];
   const sensorCount = Math.min(
     48,
     Math.max(1, Number(config?.specification.sensorCount) || results.pointResults.length || 48)
   );
 
-  // If periodic logging hasn't committed rows yet or is empty, construct a baseline row from session data
+  // When periodic data logging hasn't started (rawLogs is empty), keep temperatures blank instead of predefined 25.0
+  const hasLoggedData = Boolean(rawLogs && rawLogs.length > 0);
   let logs = rawLogs;
   if (!logs || logs.length === 0) {
-    const ambient = Number(config?.specification.ambientTemp) || results.ambientTemp || 25;
-    const initialTemps: Record<number, number> = {};
-    if (results.pointResults && results.pointResults.length > 0) {
-      results.pointResults.forEach((pt) => {
-        initialTemps[pt.pointId] = pt.initialTemp || ambient;
-      });
-    } else if (session.sensors && session.sensors.length > 0) {
-      session.sensors.forEach((s) => {
-        initialTemps[s.id] = s.initialTemp || ambient;
-      });
-    } else {
-      for (let i = 1; i <= sensorCount; i++) {
-        initialTemps[i] = ambient;
-      }
-    }
-
     logs = [
       {
         elapsedSeconds: 0,
         timestamp: session.startTimestamp || new Date().toLocaleTimeString(),
-        temperatures: initialTemps,
+        temperatures: {}, // Blank point readings when logging hasn't started
         currents: {
-          r: Number(config?.specification.testCurrent) || 0,
-          y: Number(config?.specification.testCurrent) || 0,
-          b: Number(config?.specification.testCurrent) || 0,
+          r: 0,
+          y: 0,
+          b: 0,
         },
       },
     ];
@@ -264,10 +249,10 @@ export const FinalResultsView: React.FC = () => {
                 style={{
                   fontSize: '14px',
                   fontWeight: 800,
-                  color: isOverallPass ? '#16a34a' : '#dc2626',
+                  color: isAborted ? '#dc2626' : (isOverallPass ? '#16a34a' : '#dc2626'),
                   textTransform: 'uppercase',
-                  border: `2px solid ${isOverallPass ? '#16a34a' : '#dc2626'}`,
-                  backgroundColor: isOverallPass ? '#ecfdf5' : '#fef2f2',
+                  border: `2px solid ${isAborted ? '#dc2626' : (isOverallPass ? '#16a34a' : '#dc2626')}`,
+                  backgroundColor: isAborted ? '#fef2f2' : (isOverallPass ? '#ecfdf5' : '#fef2f2'),
                   padding: '4px 12px',
                   borderRadius: '4px',
                   display: 'inline-flex',
@@ -275,8 +260,22 @@ export const FinalResultsView: React.FC = () => {
                   gap: '6px',
                 }}
               >
-                {isOverallPass ? <CheckCircle size={16} /> : <XCircle size={16} />}
-                RESULT: {isOverallPass ? 'PASS' : 'FAIL'}
+                {isAborted ? (
+                  <>
+                    <XCircle size={16} />
+                    <span>RESULT: CYCLE ABORTED</span>
+                  </>
+                ) : isOverallPass ? (
+                  <>
+                    <CheckCircle size={16} />
+                    <span>RESULT: PASS</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={16} />
+                    <span>RESULT: FAIL</span>
+                  </>
+                )}
               </div>
               <div className="font-mono" style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
                 Ref: <strong style={{ color: '#0f172a' }}>{session?.testId}</strong>
@@ -329,11 +328,16 @@ export const FinalResultsView: React.FC = () => {
             </h3>
             <table style={{ width: '100%', fontSize: '11.5px', borderCollapse: 'collapse' }}>
               <tbody>
+                {config?.specification.ratedVoltage && (
+                  <tr><td style={{ color: '#475569', padding: '3px 0', width: '40%' }}>Rated Voltage:</td><td className="font-mono" style={{ color: '#0f172a' }}>{config.specification.ratedVoltage} V</td></tr>
+                )}
+                {config?.specification.ratedCurrent && (
+                  <tr><td style={{ color: '#475569', padding: '3px 0', width: '40%' }}>Rated Current:</td><td className="font-mono" style={{ color: '#0f172a' }}>{config.specification.ratedCurrent} A</td></tr>
+                )}
                 <tr><td style={{ color: '#475569', padding: '3px 0', width: '40%' }}>Test Current:</td><td className="font-mono" style={{ color: '#2563eb', fontWeight: 700 }}>{config?.specification.testCurrent} A</td></tr>
                 <tr><td style={{ color: '#475569', padding: '3px 0' }}>Test Duration:</td><td className="font-mono" style={{ color: '#0f172a' }}>{config?.specification.testDurationHours} Hr(s)</td></tr>
                 <tr><td style={{ color: '#475569', padding: '3px 0' }}>No. of Sensors:</td><td className="font-mono" style={{ color: '#16a34a', fontWeight: 700 }}>{sensorCount} Channels</td></tr>
                 <tr><td style={{ color: '#475569', padding: '3px 0' }}>Report Log Interval:</td><td className="font-mono" style={{ color: '#0f172a' }}>{config?.specification.logIntervalMinutes || 1} Min(s)</td></tr>
-                <tr><td style={{ color: '#475569', padding: '3px 0' }}>Ambient Baseline:</td><td className="font-mono" style={{ color: '#0f172a' }}>{results.ambientTemp || 25} °C</td></tr>
               </tbody>
             </table>
           </div>
@@ -450,9 +454,9 @@ export const FinalResultsView: React.FC = () => {
                     {logs.length > 0 ? (
                       logs.map((log, idx) => {
                         const timeOnly = formatTimeOnly(log.timestamp);
-                        const rVal = log.currents?.r !== undefined ? Number(log.currents.r).toFixed(2) : '0.00';
-                        const yVal = log.currents?.y !== undefined ? Number(log.currents.y).toFixed(2) : '0.00';
-                        const bVal = log.currents?.b !== undefined ? Number(log.currents.b).toFixed(2) : '0.00';
+                        const rVal = hasLoggedData && log.currents?.r !== undefined ? Number(log.currents.r).toFixed(2) : (hasLoggedData ? '0.00' : '');
+                        const yVal = hasLoggedData && log.currents?.y !== undefined ? Number(log.currents.y).toFixed(2) : (hasLoggedData ? '0.00' : '');
+                        const bVal = hasLoggedData && log.currents?.b !== undefined ? Number(log.currents.b).toFixed(2) : (hasLoggedData ? '0.00' : '');
 
                         return (
                           <tr
@@ -478,9 +482,13 @@ export const FinalResultsView: React.FC = () => {
                               </>
                             )}
                             {channelsInBlock.map((ch) => {
-                              const temp = log.temperatures[ch];
-                              const isFail = temp !== undefined && temp !== null && temp >= 30000;
-                              const tempDisplay = isFail ? 'FAIL' : (temp !== undefined && temp !== null ? Number(temp).toFixed(1) : '-');
+                              const temp = log.temperatures ? log.temperatures[ch] : undefined;
+                              const isFail = temp !== undefined && temp !== null && temp !== '' && temp >= 30000;
+                              const tempDisplay = isFail
+                                ? 'FAIL'
+                                : (temp !== undefined && temp !== null && temp !== '' && !isNaN(Number(temp))
+                                    ? Number(temp).toFixed(1)
+                                    : '');
                               return (
                                 <td
                                   key={ch}
@@ -522,93 +530,137 @@ export const FinalResultsView: React.FC = () => {
           );
         })}
 
-        {/* SECTION 7: PLC & HMI LOG DATA & SECTION 8: PLC ALARM / FAULT HISTORY */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-          {/* Section 7 */}
-          <div className="printable-report-section" style={{ border: '1px solid #bfdbfe', borderRadius: '4px', padding: '10px 14px', backgroundColor: '#f8fafc' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <FileText size={15} /> 7. PLC & HMI Operating Log Data
-            </h3>
-            <table style={{ width: '100%', fontSize: '11.5px', borderCollapse: 'collapse' }}>
-              <tbody>
-                <tr><td style={{ color: '#475569', padding: '3px 0' }}>PLC Status:</td><td style={{ color: '#16a34a', fontWeight: 600 }}>ONLINE / RUNNING</td></tr>
-                <tr><td style={{ color: '#475569', padding: '3px 0' }}>HMI Protocol:</td><td style={{ color: '#0f172a' }}>Modbus TCP / IP Active</td></tr>
-                <tr><td style={{ color: '#475569', padding: '3px 0' }}>Current Stability:</td><td style={{ color: '#0f172a' }}>±0.4% Setpoint Variance</td></tr>
-                <tr><td style={{ color: '#475569', padding: '3px 0' }}>Sampling Rate:</td><td style={{ color: '#0f172a' }}>1 Log / Minute</td></tr>
-              </tbody>
-            </table>
-          </div>
+        {/* SECTION 6: SAFETY ALARM & TRIP HISTORY */}
+        {(() => {
+          const rawAlarms = (session?.alarmEvents || []).filter(
+            (evt) =>
+              evt.alarmId !== 1 &&
+              evt.alarmCode !== 'ALM-01' &&
+              evt.alarmName !== 'Over Temperature Limit' &&
+              !evt.alarmCode.startsWith('ALM-DIM') &&
+              !evt.alarmName.includes('Dimmer')
+          );
 
-          {/* Section 8 */}
-          <div className="printable-report-section" style={{ border: '1px solid #bfdbfe', borderRadius: '4px', padding: '10px 14px', backgroundColor: '#f8fafc' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <AlertTriangle size={15} /> 8. PLC Alarm & Fault History
-            </h3>
-            {session?.alarmEvents && session.alarmEvents.length > 0 ? (
-              <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ color: '#475569', borderBottom: '1px solid #bfdbfe', backgroundColor: '#eff6ff' }}>
-                    <th style={{ textAlign: 'left', padding: '4px 6px' }}>Time</th>
-                    <th style={{ textAlign: 'left', padding: '4px 6px' }}>Code</th>
-                    <th style={{ textAlign: 'left', padding: '4px 6px' }}>Alarm</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {session.alarmEvents.map((evt) => (
-                    <tr key={evt.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td className="font-mono" style={{ padding: '4px 6px', color: '#475569' }}>{formatTimeOnly(evt.timestamp)}</td>
-                      <td className="font-mono" style={{ padding: '4px 6px', color: '#dc2626', fontWeight: 700 }}>{evt.alarmCode}</td>
-                      <td style={{ padding: '4px 6px', color: '#0f172a' }}>{evt.alarmName}</td>
+          // Show each alarm only one time in log
+          const displayAlarms: typeof rawAlarms = [];
+          const seen = new Set<string>();
+          for (const a of rawAlarms) {
+            if (!seen.has(a.alarmCode)) {
+              seen.add(a.alarmCode);
+              displayAlarms.push(a);
+            }
+          }
+
+          return (
+            <div className="printable-report-section" style={{ border: '1px solid #bfdbfe', borderRadius: '4px', padding: '10px 14px', backgroundColor: '#f8fafc', marginBottom: '14px' }}>
+              <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertTriangle size={15} /> 6. System Safety Alarm &amp; Trip History
+              </h3>
+
+              {isAborted && (
+                <div
+                  style={{
+                    backgroundColor: '#fef2f2',
+                    border: '1px solid #f87171',
+                    borderRadius: '4px',
+                    padding: '8px 12px',
+                    marginBottom: '10px',
+                    color: '#b91c1c',
+                    fontWeight: 800,
+                    fontSize: '11.5px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <AlertTriangle size={15} color="#dc2626" />
+                  <span>CYCLE ABORTED — {session.abortReason || results?.abortReason || 'Hardware Trip Event (ALARM_RESET Pulsed)'}</span>
+                </div>
+              )}
+
+              {displayAlarms.length > 0 ? (
+                <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#475569', borderBottom: '1px solid #bfdbfe', backgroundColor: '#eff6ff' }}>
+                      <th style={{ textAlign: 'left', padding: '5px 8px' }}>Time</th>
+                      <th style={{ textAlign: 'left', padding: '5px 8px' }}>Code</th>
+                      <th style={{ textAlign: 'left', padding: '5px 8px' }}>Alarm Name</th>
+                      <th style={{ textAlign: 'left', padding: '5px 8px' }}>Description</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div style={{ fontSize: '11.5px', color: '#16a34a', padding: '6px 0', fontWeight: 600 }}>
-                ✓ No PLC alarms or trip events recorded during this test session.
-              </div>
-            )}
-          </div>
-        </div>
+                  </thead>
+                  <tbody>
+                    {displayAlarms.map((evt) => (
+                      <tr key={evt.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td className="font-mono" style={{ padding: '5px 8px', color: '#475569' }}>{formatTimeOnly(evt.timestamp)}</td>
+                        <td className="font-mono" style={{ padding: '5px 8px', color: '#dc2626', fontWeight: 700 }}>{evt.alarmCode}</td>
+                        <td style={{ padding: '5px 8px', color: '#0f172a', fontWeight: 600 }}>{evt.alarmName}</td>
+                        <td style={{ padding: '5px 8px', color: '#334155' }}>{evt.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : isAborted ? (
+                <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700 }}>
+                  ⚠️ Test session was aborted by safety trip alarm.
+                </div>
+              ) : (
+                <div style={{ fontSize: '11.5px', color: '#16a34a', padding: '6px 0', fontWeight: 600 }}>
+                  ✓ No safety alarms or trip events recorded during this test session.
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
-        {/* SECTION 9: OBSERVATIONS */}
-        <div className="printable-report-section" style={{ border: '1px solid #bfdbfe', borderRadius: '4px', padding: '10px 14px', backgroundColor: '#f8fafc', marginBottom: '14px' }}>
+        {/* SECTION 7: OBSERVATIONS (Clean empty box with space to write, no predefined values) */}
+        <div className="printable-report-section" style={{ border: '1px solid #bfdbfe', borderRadius: '4px', padding: '12px 14px', backgroundColor: '#ffffff', marginBottom: '14px' }}>
           <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <PenTool size={15} /> 9. Testing Observations & Inspector Notes
+            <PenTool size={15} /> 7. Testing Observations &amp; Inspector Notes
           </h3>
           <textarea
             className="form-input"
-            rows={2}
+            rows={4}
             value={observations}
             onChange={(e) => setObservations(e.target.value)}
-            placeholder="Operator observations, thermal imaging notes, or busbar torque inspection findings..."
-            style={{ width: '100%', fontSize: '11.5px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px solid #bfdbfe' }}
+            placeholder=""
+            style={{
+              width: '100%',
+              minHeight: '85px',
+              fontSize: '12px',
+              backgroundColor: '#ffffff',
+              color: '#0f172a',
+              border: '1px solid #cbd5e1',
+              borderRadius: '4px',
+              padding: '10px',
+              boxSizing: 'border-box',
+              resize: 'vertical',
+            }}
           />
         </div>
 
-        {/* SECTION 10: APPROVAL & SIGNATURE BLOCKS */}
+        {/* SECTION 8: APPROVAL & SIGNATURE BLOCKS */}
         <div className="printable-report-section" style={{ border: '1px solid #bfdbfe', borderRadius: '4px', padding: '14px', backgroundColor: '#f8fafc' }}>
           <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', margin: '0 0 14px 0' }}>
-            10. Formal Approval & Signatures
+            8. Formal Approval &amp; Signatures
           </h3>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', textAlign: 'center' }}>
             <div style={{ borderTop: '1px dashed #94a3b8', paddingTop: '8px' }}>
               <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>TEST OPERATOR</div>
               <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>Quality Assurance Testing Dept</div>
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>Sign & Date: _________________</div>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>Sign &amp; Date: _________________</div>
             </div>
 
             <div style={{ borderTop: '1px dashed #94a3b8', paddingTop: '8px' }}>
               <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>QUALITY ENGINEER</div>
-              <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>Inspection & Testing Dept</div>
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>Sign & Date: _________________</div>
+              <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>Inspection &amp; Testing Dept</div>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>Sign &amp; Date: _________________</div>
             </div>
 
             <div style={{ borderTop: '1px dashed #94a3b8', paddingTop: '8px' }}>
               <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>CLIENT REPRESENTATIVE</div>
               <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>{config?.customer.customerName}</div>
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>Sign & Date: _________________</div>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>Sign &amp; Date: _________________</div>
             </div>
           </div>
         </div>

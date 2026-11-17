@@ -14,40 +14,24 @@ export function generateTemperatureCsv(session: TestSession): string {
   const rows: string[] = [headers.join(',')];
 
   let logs = session.temperatureLogs;
+  const hasLoggedData = Boolean(logs && logs.length > 0);
 
-  // Fallback: If no interval rows logged yet, construct baseline
+  // Fallback: If no interval rows logged yet, construct baseline with blank values
   if (!logs || logs.length === 0) {
-    const ambient = Number(session.config?.specification?.ambientTemp) || 25;
-    const initialTemps: Record<number, number> = {};
-
-    if (session.finalResults?.pointResults) {
-      session.finalResults.pointResults.forEach((pt) => {
-        initialTemps[pt.pointId] = pt.initialTemp;
-      });
-    } else if (session.sensors && session.sensors.length > 0) {
-      session.sensors.forEach((s) => {
-        initialTemps[s.id] = s.initialTemp;
-      });
-    } else {
-      for (let i = 1; i <= sensorCount; i++) {
-        initialTemps[i] = ambient;
-      }
-    }
-
     logs = [
       {
         elapsedSeconds: 0,
         timestamp: session.startTimestamp || new Date().toLocaleTimeString(),
-        temperatures: initialTemps,
+        temperatures: {},
         currents: { r: 0, y: 0, b: 0 },
       },
     ];
   }
 
   logs.forEach((log) => {
-    const rCurrent = log.currents?.r !== undefined ? Number(log.currents.r).toFixed(2) : '0.00';
-    const yCurrent = log.currents?.y !== undefined ? Number(log.currents.y).toFixed(2) : '0.00';
-    const bCurrent = log.currents?.b !== undefined ? Number(log.currents.b).toFixed(2) : '0.00';
+    const rCurrent = hasLoggedData && log.currents?.r !== undefined ? Number(log.currents.r).toFixed(2) : (hasLoggedData ? '0.00' : '');
+    const yCurrent = hasLoggedData && log.currents?.y !== undefined ? Number(log.currents.y).toFixed(2) : (hasLoggedData ? '0.00' : '');
+    const bCurrent = hasLoggedData && log.currents?.b !== undefined ? Number(log.currents.b).toFixed(2) : (hasLoggedData ? '0.00' : '');
 
     const tempValues = Array.from({ length: sensorCount }, (_, i) => {
       const val = log.temperatures[i + 1];

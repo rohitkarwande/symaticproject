@@ -61,4 +61,12 @@ DIMMER_MAX_SW_B,Bit,0X,8,1,ReadAndWrite,,if 1 --> blink button and show b Ph Dim
 AUTO_MANUAL,Bit,0X,9,1,ReadAndWrite,,
 SET_CURRENT,Word,4X,55,2,ReadAndWrite,,
 TEST_ON,Bit,0X,10,1,ReadAndWrite,,
+ALARM_RESET,Bit,0X,11,1,ReadAndWrite,,
+SET_TIMER,Word,4X,57,1,ReadAndWrite,,
+ACT_TIMER_MIN,Word,4X,58,1,ReadAndWrite,,
+ACT_TIMER_HRS,Word,4X,59,1,ReadAndWrite,,
+IMPEDANCE_ALARM,Bit,0X,12,1,ReadAndWrite,,
+NO_CURRENT_ALARM,Bit,0X,13,1,ReadAndWrite,,
+CYCLE_COMPLITED,Bit,0X,14,1,ReadAndWrite,,
+TIMER_START,Bit,0X,15,1,ReadAndWrite,,
 
