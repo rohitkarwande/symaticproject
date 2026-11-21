@@ -256,8 +256,8 @@ export const LiveDashboard: React.FC = () => {
       ? card.phase === 'R'
         ? 'dimmerBlinkRed 0.8s infinite alternate'
         : card.phase === 'Y'
-        ? 'dimmerBlinkYellow 0.8s infinite alternate'
-        : 'dimmerBlinkBlue 0.8s infinite alternate'
+          ? 'dimmerBlinkYellow 0.8s infinite alternate'
+          : 'dimmerBlinkBlue 0.8s infinite alternate'
       : 'none',
     transition: 'all 0.2s ease',
   });
@@ -401,10 +401,10 @@ export const LiveDashboard: React.FC = () => {
               isHardwareRunning
                 ? 'Test is currently running on hardware'
                 : isDimmerAlarmActive
-                ? 'START disabled: Dimmer Zero / Dimmer Max limit switch active'
-                : hasTriggeredAlarm
-                ? 'START disabled: Active alarm present. Clear alarm before starting.'
-                : 'Start test on hardware'
+                  ? 'START disabled: Dimmer Zero / Dimmer Max limit switch active'
+                  : hasTriggeredAlarm
+                    ? 'START disabled: Active alarm present. Clear alarm before starting.'
+                    : 'Start test on hardware'
             }
           >
             <Play size={16} />
@@ -784,7 +784,7 @@ export const LiveDashboard: React.FC = () => {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a' }}>
-                    {sensor.label}
+                    {sensor.id === 1 ? 'AMBIENT TEMPERATURE' : sensor.label}
                   </span>
                   {isFail ? (
                     <span style={{ backgroundColor: '#dc2626', color: '#ffffff', fontSize: '10px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px' }}>

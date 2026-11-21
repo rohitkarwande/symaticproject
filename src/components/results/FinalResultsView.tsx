@@ -4,7 +4,6 @@ import {
   FileSpreadsheet,
   RotateCcw,
   CheckCircle,
-  XCircle,
   Building,
   Cpu,
   Sliders,
@@ -245,38 +244,6 @@ export const FinalResultsView: React.FC = () => {
             </div>
 
             <div style={{ textAlign: 'right' }}>
-              <div
-                style={{
-                  fontSize: '14px',
-                  fontWeight: 800,
-                  color: isAborted ? '#dc2626' : (isOverallPass ? '#16a34a' : '#dc2626'),
-                  textTransform: 'uppercase',
-                  border: `2px solid ${isAborted ? '#dc2626' : (isOverallPass ? '#16a34a' : '#dc2626')}`,
-                  backgroundColor: isAborted ? '#fef2f2' : (isOverallPass ? '#ecfdf5' : '#fef2f2'),
-                  padding: '4px 12px',
-                  borderRadius: '4px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                {isAborted ? (
-                  <>
-                    <XCircle size={16} />
-                    <span>RESULT: CYCLE ABORTED</span>
-                  </>
-                ) : isOverallPass ? (
-                  <>
-                    <CheckCircle size={16} />
-                    <span>RESULT: PASS</span>
-                  </>
-                ) : (
-                  <>
-                    <XCircle size={16} />
-                    <span>RESULT: FAIL</span>
-                  </>
-                )}
-              </div>
               <div className="font-mono" style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
                 Ref: <strong style={{ color: '#0f172a' }}>{session?.testId}</strong>
               </div>
